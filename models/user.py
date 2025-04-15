@@ -8,8 +8,12 @@ def create_users_table():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone_number TEXT NOT NULL UNIQUE,
+        phone TEXT NOT NULL UNIQUE,
+        passcode TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',  -- pending, approved, rejected
+        type INTEGER DEFAULT 0,        -- 0: مستخدم عادي، 1: مسؤول
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     conn.commit()
+    conn.close()
