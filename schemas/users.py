@@ -16,4 +16,5 @@ class UserCreate(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     message: str
-    user_type: int  # إضافة نوع المستخدم في الرد
+    user_type: int
+    otp_required: bool

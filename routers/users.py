@@ -1,14 +1,12 @@
 import sqlite3
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from database.connection import get_db_connection
-import secrets
 from schemas.users import UserLogin, TokenResponse
+from auth import TokenHandler, auth_scheme
+from helpers.otp_helper import OTPHelper
+from helpers.otp_session import otp_session_manager
 
 router = APIRouter()
-
-
-def generate_token():
-    return secrets.token_hex(16)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -18,7 +16,6 @@ def login(user: UserLogin):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # البحث عن المستخدم
         cursor.execute(
             "SELECT id, passcode, status, type FROM users WHERE phone = ?",
             (user.phone,)
@@ -31,54 +28,111 @@ def login(user: UserLogin):
                 "INSERT INTO users (phone, passcode, type) VALUES (?, ?, ?)",
                 (user.phone, user.passcode, 0)
             )
+            user_id = cursor.lastrowid
             conn.commit()
 
-            token = generate_token()
+            # حذف أي جلسات OTP قديمة للمستخدم (إن وجدت)
+            otp_session_manager.delete_user_sessions(user_id)
+
+            # إرسال OTP وتخزينه
+            session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
+
+            token = TokenHandler.create_session(user_id, 0)
             return {
                 "access_token": token,
-                "message": "Account created. Waiting for approval.",
-                "user_type": 0
+                "message": "Account created. OTP sent for verification.",
+                "user_type": 0,
+                "otp_required": True
             }
 
         user_id, stored_passcode, status, user_type = user_data
 
-        # التحقق من كلمة المرور
         if user.passcode != stored_passcode:
             return {
                 "access_token": "",
                 "message": "Incorrect password",
-                "user_type": 0
+                "user_type": 0,
+                "otp_required": False
             }
 
-        # توليد توكن بغض النظر عن حالة الحساب
-        token = generate_token()
+        # حذف أي جلسات OTP قديمة للمستخدم قبل إنشاء الجديدة
+        otp_session_manager.delete_user_sessions(user_id)
 
-        # تحديد الرسالة حسب حالة الحساب
+        # إرسال OTP وتخزينه للمستخدم الموجود
+        session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
+
+        token = TokenHandler.create_session(user_id, user_type)
+
         if status == 'pending':
-            message = "Account pending approval"
+            message = "Account pending approval. OTP sent for verification."
         elif status == 'rejected':
             message = "Account rejected"
         else:
-            message = "Login successful"
+            message = "OTP sent for verification"
 
         return {
             "access_token": token,
             "message": message,
-            "user_type": user_type
+            "user_type": user_type,
+            "otp_required": True
         }
 
-    except sqlite3.IntegrityError:
-        return {
-            "access_token": "",
-            "message": "Phone already registered",
-            "user_type": 0
-        }
     except Exception as e:
-        return {
-            "access_token": "",
-            "message": f"Login failed: {str(e)}",
-            "user_type": 0
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Login failed: {str(e)}"
+        )
     finally:
         if conn:
             conn.close()
+
+
+@router.post("/verify-otp")
+def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
+    try:
+        user_id = user_data["user_id"]
+
+        if not OTPHelper.verify_otp_for_user(user_id, otp):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="رمز OTP غير صحيح أو منتهي الصلاحية"
+            )
+
+        return {
+            "success": True,
+            "message": "تم التحقق من OTP بنجاح",
+            "user_id": user_id
+        }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"فشل التحقق من OTP: {str(e)}"
+        )
+
+
+@router.post("/logout")
+def logout(user_data: dict = Depends(auth_scheme)):
+    try:
+        token = user_data["token"]
+        user_id = user_data["user_id"]
+
+        # حذف جلسة OTP الخاصة بالمستخدم
+        otp_session_manager.delete_user_sessions(user_id)
+
+        # حذف جلسة التوكن
+        TokenHandler.delete_session(token)
+
+        return {
+            "success": True,
+            "message": "تم تسجيل الخروج بنجاح",
+            "user_id": user_id
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"فشل تسجيل الخروج: {str(e)}"
+        )
