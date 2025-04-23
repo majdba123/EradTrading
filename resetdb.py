@@ -2,6 +2,8 @@
 import sqlite3
 from database.connection import get_db_connection
 from models.user import create_users_table
+from models.managers import create_managers_table
+from models.managers import create_manager_assignments_table
 from seeder.user_seeder import seed_users  # استيراد دالة السيدر
 
 
@@ -11,10 +13,13 @@ def reset_database():
 
     # حذف جميع الجداول
     cursor.execute("DROP TABLE IF EXISTS users")
+    cursor.execute("DROP TABLE IF EXISTS managers")
+
 
     # إعادة إنشاء الجداول
     create_users_table()
-
+    create_managers_table()
+    create_manager_assignments_table
     # تشغيل السيدر لإضافة المستخدم الافتراضي
     seed_users()
 
