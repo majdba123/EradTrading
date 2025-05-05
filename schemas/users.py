@@ -18,3 +18,15 @@ class TokenResponse(BaseModel):
     message: str
     user_type: int
     otp_required: bool
+
+class ManagerCreate(BaseModel):
+    phone: str
+    name: str
+    passcode: str
+
+class ManagerFilter(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
+    page: Optional[int] = 1
+    per_page: Optional[int] = 10
