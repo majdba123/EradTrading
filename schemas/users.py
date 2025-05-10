@@ -1,17 +1,14 @@
 from pydantic import BaseModel
 from typing import Optional
 
-
 class UserLogin(BaseModel):
     phone: str
     passcode: str
 
-
-class UserCreate(BaseModel):
+class UserRegister(BaseModel):
     phone: str
-    passcode: str
-    type: Optional[int] = 0  # القيمة الافتراضية 0
-
+    first_name: str
+    last_name: str
 
 class TokenResponse(BaseModel):
     access_token: str

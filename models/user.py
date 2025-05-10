@@ -10,6 +10,8 @@ def create_users_table():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT NOT NULL UNIQUE,
         passcode TEXT NOT NULL,
+        first_name TEXT,
+        last_name TEXT,
         status TEXT DEFAULT 'pending',  -- pending, approved, rejected
         type INTEGER DEFAULT 0,        -- 0: مستخدم عادي، 1: مسؤول
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

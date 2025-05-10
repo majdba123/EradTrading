@@ -1,8 +1,10 @@
 from fastapi import FastAPI
-from routers import users, admin, kyc 
+from routers import users, admin, kyc ,mt5
 from models.user import create_users_table
 from models.managers import create_managers_table, create_manager_assignments_table
 from models.kyc import create_kyc_table 
+from models.mt5 import create_mt5_accounts_table 
+
 from resetdb import reset_database
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -27,6 +29,7 @@ def on_startup():
     create_managers_table()
     create_manager_assignments_table()
     create_kyc_table()  # تم إضافة إنشاء جدول KYC
+    create_mt5_accounts_table()
     print("✅ All tables initialized successfully")
 
 @app.post("/reset-database")
@@ -38,3 +41,4 @@ def reset_db():
 app.include_router(users.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(kyc.router, prefix="/api")  # تم إضافة راوتر KYC
+app.include_router(mt5.router, prefix="/api/mt5")  # إضافة هذا السطر

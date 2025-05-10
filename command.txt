@@ -1,3 +1,4 @@
 sqlite_web Erad.db
 uvicorn main:app --reload
 uvicorn main:app --reload --port 5000
+pip install cryptography
