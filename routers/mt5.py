@@ -1,4 +1,6 @@
 import sqlite3
+from datetime import datetime  # أضف هذا مع بقية imports في أعلى الملف
+
 from security import cipher  # استيراد كائن التشفير
 from fastapi import APIRouter, Depends, HTTPException, status
 from database.connection import get_db_connection
@@ -633,6 +635,17 @@ async def deposit_to_mt5(login: int, transaction: MT5DepositWithdraw, user_data:
             detail=f"Deposit failed: {e.message}"
         )
 
+
+
+
+
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
+ 
+ 
 @router.post("/accounts/{login}/withdraw", summary="Withdraw funds from an MT5 account")
 async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_data: dict = Depends(auth_scheme)):
     """
@@ -659,6 +672,13 @@ async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_da
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Withdrawal failed: {e.message}"
         )
+        
+        
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
 
 @router.post("/accounts/transfer", summary="Transfer funds between MT5 accounts")
 async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(auth_scheme)):
@@ -689,6 +709,10 @@ async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(
         )
 
 
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
 @router.post("/accounts/{login}/enable-trading", summary="Enable trading for MT5 account")
 async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)):
     """
@@ -708,6 +732,10 @@ async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme))
             detail=f"Trading enable failed: {e.message}"
         )
 
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
 @router.post("/accounts/{login}/disable-trading", summary="Disable trading for MT5 account")
 async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)):
     """
@@ -726,3 +754,214 @@ async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Trading disable failed: {e.message}"
         )
+        
+        
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
+        
+        
+        
+        
+# أضف هذه الدوال في نهاية ملف mt5.py (قبل آخر قوس)
+@router.get("/crypto/currencies", response_model=dict, summary="Get available cryptocurrencies")
+async def get_crypto_currencies(user_data: dict = Depends(auth_scheme)):
+    """
+    الحصول على قائمة العملات الرقمية المتاحة للإيداع والسحب
+    """
+    client = get_mt5_client()
+    try:
+        # إضافة logging لرؤية ما يحدث
+        print("Attempting to get currencies from SCB API...")
+        currencies = client.get_currencies()
+        print("Received currencies:", currencies)
+        
+        # تحقق من وجود البيانات المطلوبة
+        if not currencies:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No currencies data found"
+            )
+            
+        return {
+            "success": True,
+            "currencies": currencies,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except SCBAPIError as e:
+        print(f"SCBAPIError: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to get currencies: {e.message}"
+        )
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+@router.post("/crypto/deposit-request", response_model=dict, summary="Create crypto deposit request (Simplified)")
+async def create_crypto_deposit_request_simplified(
+    request_data: dict,  # سيستقبل فقط currency_id
+    user_data: dict = Depends(auth_scheme)
+):
+    """
+    إنشاء طلب إيداع عملة رقمية (مبسط)
+    
+    المطلوب:
+    {
+        "currency_id": "BTC"  # رمز العملة فقط (مثل BTC, ETH)
+    }
+    
+    الإرجاع:
+    - عنوان الإيداع
+    - معلومات الطلب
+    """
+    client = get_mt5_client()
+    try:
+        # التحقق من وجود currency_id
+        currency_id = request_data.get("currency_id")
+        if not currency_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="currency_id is required"
+            )
+
+        # سيتم توليد الباقي تلقائياً في SCBClient
+        result = client.create_deposit_request(
+            currency_id=currency_id
+            # tracking_id, label, confirmations_needed سيتم توليدها تلقائياً
+        )
+        
+        return {
+            "success": True,
+            "deposit_address": result.get("address"),
+            "currency": currency_id,
+            "tracking_id": result.get("tracking_id"),
+            "min_amount": result.get("min_amount", "0.0"),
+            "qr_code": result.get("qr_code", "")  # إذا كان متاحاً
+        }
+        
+    except SCBAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Deposit failed: {e.message}"
+        )
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
+
+@router.post("/crypto/withdraw-request", response_model=dict, summary="Create crypto withdrawal request")
+async def create_crypto_withdrawal_request(
+    withdraw_data: dict,
+    user_data: dict = Depends(auth_scheme)
+):
+    """
+    إنشاء طلب سحب عملة رقمية
+    
+    المطلوب:
+    {
+        "amount": 0.5,                # المبلغ المطلوب سحبه
+        "address": "1ABC...",          # عنوان المحفظة المستقبلة
+        "currency_id": "BTC",          # رمز العملة
+        "tracking_id": "unique123",    # معرف التتبع (اختياري)
+        "label": "Withdrawal",         # وصف العملية (اختياري)
+        "is_fee_included": True        # هل الرسوم مشمولة في المبلغ؟ (اختياري)
+    }
+    
+    الإرجاع:
+    - معلومات العملية
+    - رقم التتبع
+    - حالة الطلب
+    """
+    client = get_mt5_client()
+    try:
+        result = client.create_withdrawal_request(
+            amount=withdraw_data["amount"],
+            address=withdraw_data["address"],
+            currency_id=withdraw_data["currency_id"],
+            tracking_id=withdraw_data.get("tracking_id"),
+            label=withdraw_data.get("label", "Withdrawal"),
+            is_fee_included=withdraw_data.get("is_fee_included", True)
+        )
+        
+        return {
+            "success": True,
+            "message": "Withdrawal request submitted",
+            "withdrawal_details": result,
+            "estimated_processing": "1-24 hours"  # يمكن جعلها ديناميكية من الرد
+        }
+    except SCBAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Withdrawal request failed: {e.message}"
+        )
+        
+        
+        
+
+
+
+
+@router.post("/crypto/test-all-currencies")
+async def test_all_currencies_endpoint(user_data: dict = Depends(auth_scheme)):
+    client = get_mt5_client()
+    try:
+        # 1. جلب قائمة العملات الكاملة
+        currencies = client.get_currencies()
+        if not currencies:
+            raise HTTPException(500, "No currencies data received")
+        
+        print(f"Testing {len(currencies)} currencies...")
+        working_currencies = []
+        
+        # 2. اختبار كل العملات مع إدارة الذاكرة
+        for currency_code, currency_id in currencies.items():
+            try:
+                # أولا: جرب باستخدام الرقم (ID)
+                result = client.create_deposit_request(currency_id=currency_id)
+                if result.get("address"):
+                    working_currencies.append({
+                        "currency": currency_code,
+                        "attempted_as": currency_id,
+                        "address": result["address"],
+                        "min_amount": result.get("min_amount", "N/A")
+                    })
+                    print(f"✅ Success with ID: {currency_id}")
+                    continue
+                    
+                # ثانيا: إذا فشل، جرب باستخدام الرمز (Code)
+                result = client.create_deposit_request(currency_id=currency_code)
+                if result.get("address"):
+                    working_currencies.append({
+                        "currency": currency_code,
+                        "attempted_as": currency_code,
+                        "address": result["address"],
+                        "min_amount": result.get("min_amount", "N/A")
+                    })
+                    print(f"✅ Success with Code: {currency_code}")
+                    
+            except SCBAPIError as e:
+                print(f"❌ Failed for {currency_code}/{currency_id}: {e.message}")
+                continue
+            except Exception as e:
+                print(f"⚠️ Unexpected error for {currency_code}: {str(e)}")
+                continue
+
+        return {
+            "success": True,
+            "tested_currencies": len(currencies),
+            "supported_currencies": working_currencies,
+            "count": len(working_currencies),
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Test failed: {str(e)}")
