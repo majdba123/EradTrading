@@ -66,7 +66,7 @@ def get_mt5_client():
 
 
 
-@router.post("/accounts", response_model=dict, summary="إنشاء حساب MT5 جديد")
+@router.post("/accounts", response_model=dict, summary=" Create New Account  ")
 async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_scheme)):
     """
     إنشاء حساب جديد في MT5 مع **تشفير كلمات المرور**.
@@ -81,7 +81,7 @@ async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_
         user = cursor.fetchone()
 
         if not user:
-            raise HTTPException(status_code=404, detail="لم يتم العثور على بيانات المستخدم")
+            raise HTTPException(status_code=404, detail="User not found")
 
         first_name, last_name = user
 
@@ -113,7 +113,7 @@ async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_
 
         return {
             "success": True,
-            "message": "تم إنشاء حساب MT5 بنجاح",
+            "message": "MT5 account created successfully",
             "account_details": {
                 "login": result["login"],
                 "password": result["password"],  # إرجاع كلمة المرور الأصلية للعميل
@@ -124,9 +124,9 @@ async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_
         }
 
     except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="حساب MT5 موجود بالفعل لهذا المستخدم")
+        raise HTTPException(status_code=400, detail="An MT5 account already exists for this user.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"حدث خطأ غير متوقع: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
     finally:
         if conn:
             conn.close()
@@ -140,7 +140,7 @@ async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_
 
 
 
-@router.get("/accounts/my-accounts", response_model=list, summary="الحصول على جميع حساباتي في MT5")
+@router.get("/accounts/my-accounts", response_model=list, summary="Get all my MT5 accounts")
 async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme)):
     """
     الحصول على جميع حسابات MT5 الخاصة بالمستخدم الحالي مع فك تشفير كلمات المرور
@@ -191,7 +191,7 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme)):
                 
             except Exception as decrypt_error:
                 # في حالة فشل فك التشفير، نرجع كلمة مرور مخفية
-                print(f"فشل فك تشفير كلمة المرور للحساب {login}: {str(decrypt_error)}")
+                print(f"Account password decryption failed {login}: {str(decrypt_error)}")
                 result.append({
                     "login": login,
                     "password": "******",
@@ -206,12 +206,12 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme)):
     except sqlite3.Error as db_error:
         raise HTTPException(
             status_code=500,
-            detail=f"خطأ في قاعدة البيانات: {str(db_error)}"
+            detail=f"Database error: {str(db_error)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
@@ -228,7 +228,7 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme)):
         
         
         
-@router.get("/accounts/{login}", response_model=MT5AccountInfo, summary="الحصول على معلومات حساب MT5")
+@router.get("/accounts/{login}", response_model=MT5AccountInfo, summary="Get MT5 account information")
 async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme)):
     """
     الحصول على معلومات حساب MT5
@@ -250,7 +250,7 @@ async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme)):
         if not account_exists:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="ليس لديك صلاحية الوصول إلى هذا الحساب"
+                detail="You do not have access to this account."
             )
 
         # جلب معلومات الحساب من MT5
@@ -268,12 +268,12 @@ async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme)):
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND if e.code == 404 else status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل جلب معلومات الحساب: {e.message}"
+            detail=f"Failed to fetch account information: {e.message}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
@@ -284,10 +284,53 @@ async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme)):
 ####################################################################################################################################################
 ####################################################################################################################################################
         
+@router.post("/auth/send-otp", response_model=dict, summary="Send OTP verification code")
+async def send_otp(
+    phone_data: dict ,
+    user_data: dict = Depends(auth_scheme)  # اختياري حسب الحاجة
+):
+    """
+    إرسال رمز OTP إلى رقم الهاتف
+    
+    المطلوب:
+    {
+        "phone": "رقم الهاتف (مع مفتاح الدولة)"
+    }
+    """
+    try:
+        phone = phone_data.get("phone")
+        if not phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Phone number must be provided."
+            )
+
+        client = get_mt5_client()
+        result = client.send_otp(phone)
+        
+        return {
+            "success": True,
+            "message": "Verification code sent",
+            "phone": phone,
+            "otp_ref": result.get("otp_ref"),  # مرجع للتحقق لاحقاً
+            "expires_in": 300  # ثانية (5 دقائق)
+        }
+    
+    except SCBAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to send code: {e.message}"
+        )
+
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+  
             
             
             
-@router.post("/accounts/change-password/{login}/", summary="تغيير كلمة مرور حساب MT5")
+@router.post("/accounts/change-password/{login}/", summary="Change MT5 account password")
 async def change_mt5_password(
     login: int, 
     password_data: MT5PasswordChange, 
@@ -314,7 +357,7 @@ async def change_mt5_password(
         if not account_exists:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="ليس لديك صلاحية الوصول إلى هذا الحساب"
+                detail="You do not have access to this account."
             )
 
         # تغيير كلمة المرور في MT5
@@ -330,7 +373,7 @@ async def change_mt5_password(
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="فشل تغيير كلمة المرور في MT5"
+                detail="MT5 password change failed"
             )
 
         # تحديث كلمة المرور في قاعدة البيانات (مع التشفير)
@@ -351,7 +394,7 @@ async def change_mt5_password(
 
         return {
             "success": True,
-            "message": "تم تغيير كلمة المرور بنجاح في MT5 وقاعدة البيانات",
+            "message": "Password changed successfully in MT5 and database",
             "login": login,
             "password_type": password_data.password_type
         }
@@ -361,12 +404,12 @@ async def change_mt5_password(
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل تغيير كلمة المرور في MT5: {e.message}"
+            detail=f"MT5 password change failed: {e.message}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
@@ -376,11 +419,194 @@ async def change_mt5_password(
 ####################################################################################################################################################
 ####################################################################################################################################################
  
-            
-            
 
 
-@router.post("/accounts/{login}/deposit", summary="إيداع أموال في حساب MT5")
+@router.post("/accounts/check-password/{login_id}", response_model=dict, summary="Verify your MT5 account password")
+async def verify_mt5_password(
+    login_id: int,  # سيستقبل login_id كمسار في الرابط
+    password_request: dict,  # سيستقبل كلمة المرور ونوعها
+    user_data: dict = Depends(auth_scheme)  # بيانات المستخدم المصادق عليه
+):
+    """
+    التحقق من صحة كلمة مرور حساب MT5 مع التحقق من ملكية الحساب
+    
+    المطلوب:
+    - Path Parameter: login_id (رقم حساب MT5)
+    - Request Body:
+    {
+        "password": "كلمة المرور المراد التحقق منها",
+        "password_type": "MAIN" أو "INVESTOR" (اختياري - افتراضي MAIN)
+    }
+    
+    العملية:
+    1. التحقق من أن login_id يخص المستخدم المصادق عليه
+    2. التحقق من كلمة المرور مع MT5
+    3. إرجاع نتيجة التحقق
+    """
+    conn = None
+    try:
+        # 1. التحقق من وجود البيانات المطلوبة
+        if not password_request.get("password"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be entered"
+            )
+
+        password = password_request["password"]
+        password_type = password_request.get("password_type", "MAIN")
+
+        # 2. التحقق من أن الحساب يخص المستخدم
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT 1 
+               FROM user_mt5_accounts 
+               WHERE user_id = ? AND mt5_login_id = ?""",
+            (user_data["user_id"], login_id)
+        )
+        account_exists = cursor.fetchone()
+
+        if not account_exists:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this account."
+            )
+
+        # 3. التحقق من كلمة المرور مع MT5
+        client = get_mt5_client()
+        is_valid = client.check_password(
+            login=login_id,
+            password=password,
+            password_type=password_type
+        )
+
+        # 4. إرجاع النتيجة
+        return {
+            "success": True,
+            "login_id": login_id,
+            "password_type": password_type,
+            "is_valid": is_valid,
+            "message": "The password is correct" if is_valid else "The password is incorrect.",
+            "user_verified": True  # تأكيد أن المستخدم يملك هذا الحساب
+        }
+
+    except HTTPException:
+        raise
+    except SCBAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password verification error: {e.message}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
+@router.post("/accounts/update-rights/{login_id}", 
+             response_model=dict, 
+             summary="Update MT5 account permissions")
+async def update_mt5_user_rights(
+    login_id: int ,
+    rights_data: dict,
+    user_data: dict = Depends(auth_scheme)
+):
+    """
+    تحديث صلاحيات وإعدادات حساب MT5 مع التحقق من ملكية الحساب
+    
+    المطلوب:
+    - Path Parameter: login_id (رقم حساب MT5)
+    - Request Body:
+    {
+        "rights": {
+            "USER_RIGHT_ENABLED": 1,       // 1 لتمكين، 0 لتعطيل
+            "USER_RIGHT_TRADE_DISABLED": 0  // 1 لتعطيل التداول، 0 لتمكين
+        },
+        "params": {                        // اختياري
+            "leverage": 100,               // الرافعة المالية
+            "email": "user@example.com"    // البريد الإلكتروني
+        }
+    }
+    """
+    conn = None
+    try:
+        # 1. التحقق من ملكية الحساب
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT 1 FROM user_mt5_accounts 
+               WHERE user_id = ? AND mt5_login_id = ?""",
+            (user_data["user_id"], login_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this account."
+            )
+
+        # 2. التحقق من وجود البيانات المطلوبة
+        if not rights_data.get("rights"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The required authorization data must be provided."
+            )
+
+        rights = rights_data["rights"]
+        params = rights_data.get("params", {})
+
+        # 3. تحديث الصلاحيات في MT5
+        client = get_mt5_client()
+        result = client.update_user_rights(
+            login=login_id,
+            rights=rights,
+            params=params
+        )
+
+        # 4. إرجاع النتيجة
+        return {
+            "success": True,
+            "login_id": login_id,
+            "updated_rights": rights,
+            "updated_params": params,
+            "mt5_response": result,
+            "user_verified": True
+        }
+
+    except HTTPException:
+        raise
+    except SCBAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error updating permissions: {e.message}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+
+####################################################################################################################################################
+####################################################################################################################################################
+####################################################################################################################################################
+ 
+          
+
+
+@router.post("/accounts/{login}/deposit", summary="Deposit funds into an MT5 account")
 async def deposit_to_mt5(login: int, transaction: MT5DepositWithdraw, user_data: dict = Depends(auth_scheme)):
     """
     إيداع أموال في حساب MT5
@@ -398,16 +624,16 @@ async def deposit_to_mt5(login: int, transaction: MT5DepositWithdraw, user_data:
         )
         return {
             "success": True,
-            "message": "تم الإيداع بنجاح",
+            "message": "Deposit successfully",
             "transaction_details": result
         }
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل عملية الإيداع: {e.message}"
+            detail=f"Deposit failed: {e.message}"
         )
 
-@router.post("/accounts/{login}/withdraw", summary="سحب أموال من حساب MT5")
+@router.post("/accounts/{login}/withdraw", summary="Withdraw funds from an MT5 account")
 async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_data: dict = Depends(auth_scheme)):
     """
     سحب أموال من حساب MT5
@@ -425,16 +651,16 @@ async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_da
         )
         return {
             "success": True,
-            "message": "تم السحب بنجاح",
+            "message": "Withdrawal successful",
             "transaction_details": result
         }
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل عملية السحب: {e.message}"
+            detail=f"Withdrawal failed: {e.message}"
         )
 
-@router.post("/accounts/transfer", summary="تحويل أموال بين حسابات MT5")
+@router.post("/accounts/transfer", summary="Transfer funds between MT5 accounts")
 async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(auth_scheme)):
     """
     تحويل أموال بين حسابات MT5
@@ -453,17 +679,17 @@ async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(
         )
         return {
             "success": True,
-            "message": "تم التحويل بنجاح",
+            "message": "Transfer successfully",
             "transaction_details": result
         }
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل عملية التحويل: {e.message}"
+            detail=f"Conversion failed: {e.message}"
         )
 
 
-@router.post("/accounts/{login}/enable-trading", summary="تمكين التداول لحساب MT5")
+@router.post("/accounts/{login}/enable-trading", summary="Enable trading for MT5 account")
 async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)):
     """
     تمكين التداول لحساب MT5
@@ -473,16 +699,16 @@ async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme))
         result = client.enable_trading(login)
         return {
             "success": True,
-            "message": "تم تمكين التداول بنجاح",
+            "message": "Trading has been successfully enabled.",
             "account_info": result
         }
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل تمكين التداول: {e.message}"
+            detail=f"Trading enable failed: {e.message}"
         )
 
-@router.post("/accounts/{login}/disable-trading", summary="تعطيل التداول لحساب MT5")
+@router.post("/accounts/{login}/disable-trading", summary="Disable trading for MT5 account")
 async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)):
     """
     تعطيل التداول لحساب MT5
@@ -492,11 +718,11 @@ async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)
         result = client.disable_trading(login)
         return {
             "success": True,
-            "message": "تم تعطيل التداول بنجاح",
+            "message": "Trading has been successfully disabled.",
             "account_info": result
         }
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل تعطيل التداول: {e.message}"
+            detail=f"Trading disable failed: {e.message}"
         )
