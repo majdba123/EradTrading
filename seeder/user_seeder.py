@@ -9,7 +9,7 @@ def seed_users():
     # بيانات المستخدم الافتراضي
     default_user = {
         'phone': '0123456789',
-        'passcode': '1234',
+        'passcode': '123456',
         'status': 'approved',
         'type': 1
     }

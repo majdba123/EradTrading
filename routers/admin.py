@@ -1,7 +1,7 @@
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from database.connection import get_db_connection
-from schemas.users import ManagerCreate, ManagerFilter
+from schemas.users import ManagerCreate, ManagerFilter, UserStatusUpdate
 from admin_auth import admin_scheme
 from typing import Optional
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ router = APIRouter(
     prefix="/admin",
     tags=["Admin"]
 )
+
 
 @router.post("/add-manager")
 def add_manager(
@@ -73,11 +74,13 @@ def add_manager(
         if conn:
             conn.close()
 
+
 @router.get("/managers")
 def get_all_managers(
     admin_data: dict = Depends(admin_scheme),
     page: int = Query(1, gt=0, description="رقم الصفحة"),
-    per_page: int = Query(10, gt=0, le=100, description="عدد العناصر في الصفحة"),
+    per_page: int = Query(
+        10, gt=0, le=100, description="عدد العناصر في الصفحة"),
     name: Optional[str] = Query(None, description="تصفية حسب الاسم"),
     phone: Optional[str] = Query(None, description="تصفية حسب رقم الهاتف"),
     status: Optional[str] = Query(None, description="تصفية حسب الحالة")
@@ -161,6 +164,7 @@ def get_all_managers(
     finally:
         if conn:
             conn.close()
+
 
 @router.post("/managers/filter")
 def filter_managers(
@@ -247,8 +251,10 @@ def filter_managers(
         if conn:
             conn.close()
 
+
 class AssignUserRequest(BaseModel):
     user_id: int
+
 
 @router.get("/managers-with-users")
 def get_managers_with_users(
@@ -306,6 +312,7 @@ def get_managers_with_users(
         if conn:
             conn.close()
 
+
 @router.post("/assign-user-to-manager/{manager_id}")
 def assign_user_to_manager(
     manager_id: int,
@@ -327,7 +334,8 @@ def assign_user_to_manager(
             )
 
         # التحقق من وجود المستخدم
-        cursor.execute("SELECT id, type FROM users WHERE id = ?", (request.user_id,))
+        cursor.execute("SELECT id, type FROM users WHERE id = ?",
+                       (request.user_id,))
         user = cursor.fetchone()
         if not user:
             raise HTTPException(
@@ -348,7 +356,7 @@ def assign_user_to_manager(
             WHERE user_id = ?
         """, (request.user_id,))
         existing_assignment = cursor.fetchone()
-        
+
         if existing_assignment:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -388,6 +396,7 @@ def assign_user_to_manager(
         if conn:
             conn.close()
 
+
 @router.delete("/delete-manager/{manager_id}")
 def delete_manager(
     manager_id: int,
@@ -410,9 +419,9 @@ def delete_manager(
             WHERE m.id = ?
             GROUP BY m.id
         """, (manager_id,))
-        
+
         manager_info = cursor.fetchone()
-        
+
         if not manager_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -443,7 +452,7 @@ def delete_manager(
         """, (user_id,))
 
         conn.commit()
-        
+
         return {
             "success": True,
             "message": "تم حذف المدير بنجاح",
@@ -466,9 +475,11 @@ def delete_manager(
         if conn:
             conn.close()
 
+
 class UnassignUserRequest(BaseModel):
     manager_id: int
     user_id: int
+
 
 @router.post("/unassign-user")
 def unassign_user(
@@ -486,7 +497,7 @@ def unassign_user(
             SELECT 1 FROM manager_assignments
             WHERE manager_id = ? AND user_id = ?
         """, (request.manager_id, request.user_id))
-        
+
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -500,7 +511,7 @@ def unassign_user(
         """, (request.manager_id, request.user_id))
 
         conn.commit()
-        
+
         return {
             "success": True,
             "message": "تم فك ربط المستخدم من المدير بنجاح",
@@ -522,6 +533,7 @@ def unassign_user(
 
 @router.get("/manager-users/{manager_id}")
 def get_manager_users(
+
     manager_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
@@ -547,7 +559,7 @@ def get_manager_users(
             JOIN users u ON ma.user_id = u.id
             WHERE ma.manager_id = ?
         """, (manager_id,))
-        
+
         # تحويل النتائج إلى قواميس
         users = []
         for row in cursor.fetchall():
@@ -556,7 +568,7 @@ def get_manager_users(
                 "phone": row["phone"],
                 "status": row["status"]
             })
-        
+
         return {
             "manager_id": manager_id,
             "assigned_users": users,
@@ -569,6 +581,82 @@ def get_manager_users(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"فشل في جلب البيانات: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'banned']
+
+
+@router.put("/update-user-status")
+def update_user_status(
+    status_data: UserStatusUpdate,
+    admin_data: dict = Depends(admin_scheme)
+):
+    """تحديث حالة المستخدم مع التحقق من الحظر التطبيقي"""
+    conn = None
+    try:
+        # التحقق من أن الحالة الجديدة مسموح بها
+        if status_data.new_status not in ALLOWED_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"الحالة غير صالحة. الحالات المسموحة: {', '.join(ALLOWED_STATUSES)}"
+            )
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 1. التحقق من وجود المستخدم وأنه ليس مديراً
+        cursor.execute(
+            "SELECT id, type FROM users WHERE id = ?",
+            (status_data.user_id,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="المستخدم غير موجود"
+            )
+
+        if user[1] == 1:  # إذا كان المستخدم مديراً
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="لا يمكن تغيير حالة المديرين"
+            )
+
+        # 2. تحديث حالة المستخدم
+        cursor.execute(
+            "UPDATE users SET status = ? WHERE id = ?",
+            (status_data.new_status, status_data.user_id)
+        )
+
+        # إذا تم حظر المستخدم، نقوم بإنهاء جميع جلساته
+        if status_data.new_status == 'banned':
+            cursor.execute(
+                "DELETE FROM user_sessions WHERE user_id = ?",
+                (status_data.user_id,)
+            )
+
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"تم تحديث حالة المستخدم إلى '{status_data.new_status}' بنجاح",
+            "user_id": status_data.user_id,
+            "new_status": status_data.new_status
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"فشل في تحديث حالة المستخدم: {str(e)}"
         )
     finally:
         if conn:

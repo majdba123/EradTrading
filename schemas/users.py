@@ -27,3 +27,7 @@ class ManagerFilter(BaseModel):
     status: Optional[str] = None
     page: Optional[int] = 1
     per_page: Optional[int] = 10
+
+class UserStatusUpdate(BaseModel):
+    user_id: int
+    new_status: str  # يمكن أن يكون: 'pending', 'approved', 'rejected', 'banned'
