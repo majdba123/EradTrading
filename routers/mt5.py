@@ -86,41 +86,57 @@ async def create_mt5_account(account_data: dict, user_data: dict = Depends(auth_
         first_name, last_name = user
 
         # إنشاء الحساب في MT5
-        result = client.create_account(
-            first_name=first_name,
-            last_name=last_name,
-            account_type=account_data["account_type"]
-        )
+        # result = client.create_account(
+        #     first_name=first_name,
+        #     last_name=last_name,
+        #     account_type=account_data["account_type"]
+        # )
 
-        # **تشفير كلمات المرور قبل التخزين**
-        encrypted_password = cipher.encrypt_password(result["password"])
-        encrypted_investor_password = cipher.encrypt_password(result["investor_password"])
+        # # **تشفير كلمات المرور قبل التخزين**
+        # encrypted_password = cipher.encrypt_password(result["password"])
+        # encrypted_investor_password = cipher.encrypt_password(result["investor_password"])
 
         # تخزين بيانات الحساب في قاعدة البيانات
+        # cursor.execute(
+        #     """INSERT INTO user_mt5_accounts 
+        #     (user_id, mt5_login_id, mt5_password, mt5_investor_password, account_type) 
+        #     VALUES (?, ?, ?, ?, ?)""",
+        #     (
+        #         user_data["user_id"],
+        #         result["login"],
+        #         encrypted_password,
+        #         encrypted_investor_password,
+        #         result["type"]
+        #     )
+        # )
+        # conn.commit()
         cursor.execute(
             """INSERT INTO user_mt5_accounts 
             (user_id, mt5_login_id, mt5_password, mt5_investor_password, account_type) 
             VALUES (?, ?, ?, ?, ?)""",
             (
                 user_data["user_id"],
-                result["login"],
-                encrypted_password,
-                encrypted_investor_password,
-                result["type"]
+                0,
+                0,
+                0,
+                account_data["account_type"]
             )
         )
         conn.commit()
 
         return {
-            "success": True,
+            # "success": True,
+            # "message": "MT5 account created successfully",
+            # "account_details": {
+            #     "login": result["login"],
+            #     "password": result["password"],  # إرجاع كلمة المرور الأصلية للعميل
+            #     "investor_password": result["investor_password"],
+            #     "type": result["type"],
+            #     "name": f"{first_name} {last_name}"
+            # }
+                        "success": True,
             "message": "MT5 account created successfully",
-            "account_details": {
-                "login": result["login"],
-                "password": result["password"],  # إرجاع كلمة المرور الأصلية للعميل
-                "investor_password": result["investor_password"],
-                "type": result["type"],
-                "name": f"{first_name} {last_name}"
-            }
+
         }
 
     except sqlite3.IntegrityError:

@@ -1,7 +1,6 @@
 import sqlite3
 from database.connection import get_db_connection
 
-
 def create_users_table():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -20,6 +19,28 @@ def create_users_table():
     conn.commit() 
     conn.close()
 
+
+def create_user_devices_table():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_devices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        ip_address TEXT NOT NULL,
+        device_name TEXT,
+        device_type TEXT,
+        os TEXT,
+        browser TEXT,
+        country TEXT,
+        city TEXT,
+        login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )
+    """)
+    conn.commit()
+    conn.close()
+    
 def create_user_sessions_table():
     conn = get_db_connection()
     cursor = conn.cursor()

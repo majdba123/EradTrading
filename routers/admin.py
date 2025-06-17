@@ -5,6 +5,8 @@ from schemas.users import ManagerCreate, ManagerFilter, UserStatusUpdate
 from admin_auth import admin_scheme
 from typing import Optional
 from pydantic import BaseModel
+from auth import TokenHandler
+
 
 router = APIRouter(
     prefix="/admin",
@@ -657,6 +659,304 @@ def update_user_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"فشل في تحديث حالة المستخدم: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/pending-accounts", summary="Get pending accounts for approval")
+def get_pending_accounts(
+    admin_data: dict = Depends(admin_scheme),
+    page: int = Query(1, gt=0),
+    per_page: int = Query(10, gt=0, le=100)
+):
+    """Get list of accounts waiting for admin approval"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Calculate offset for pagination
+        offset = (page - 1) * per_page
+
+        # Total count query
+        cursor.execute(
+            "SELECT COUNT(*) FROM users WHERE status = 'pending_approval'"
+        )
+        total_count = cursor.fetchone()[0]
+
+        # Get paginated results
+        cursor.execute(
+            """SELECT id, phone, first_name, last_name, created_at 
+            FROM users 
+            WHERE status = 'pending_approval'
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?""",
+            (per_page, offset)
+        )
+
+        accounts = []
+        for row in cursor.fetchall():
+            accounts.append({
+                "user_id": row[0],
+                "phone": row[1],
+                "first_name": row[2],
+                "last_name": row[3],
+                "created_at": row[4]
+            })
+
+        return {
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": (total_count + per_page - 1) // per_page,
+            "pending_accounts": accounts
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch pending accounts: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/approve-account/{user_id}", summary="Approve user account")
+def approve_user_account(
+    user_id: int,
+    admin_data: dict = Depends(admin_scheme)
+):
+    """Approve a pending user account"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if user exists and is pending approval
+        cursor.execute(
+            "SELECT status FROM users WHERE id = ?",
+            (user_id,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if user[0] != 'pending_approval':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account is not pending approval"
+            )
+
+        # Update user status to approved
+        cursor.execute(
+            "UPDATE users SET status = 'approved' WHERE id = ?",
+            (user_id,)
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": "Account approved successfully",
+            "user_id": user_id,
+            "new_status": "approved"
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to approve account: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/reject-account/{user_id}", summary="Reject user account")
+def reject_user_account(
+    user_id: int,
+    admin_data: dict = Depends(admin_scheme)
+):
+    """Reject a pending user account"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if user exists and is pending approval
+        cursor.execute(
+            "SELECT status FROM users WHERE id = ?",
+            (user_id,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if user[0] != 'pending_approval':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account is not pending approval"
+            )
+
+        # Update user status to rejected and delete related data
+        cursor.execute(
+            "UPDATE users SET status = 'rejected' WHERE id = ?",
+            (user_id,)
+        )
+
+        # Delete any sessions or OTPs
+        cursor.execute(
+            "DELETE FROM user_sessions WHERE user_id = ?",
+            (user_id,)
+        )
+
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": "Account rejected successfully",
+            "user_id": user_id,
+            "new_status": "rejected"
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reject account: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/sessions", summary="عرض جميع الجلسات النشطة")
+async def get_all_active_sessions(
+    admin: dict = Depends(admin_scheme),
+    page: int = Query(1, gt=0, description="رقم الصفحة"),
+    per_page: int = Query(
+        10, gt=0, le=100, description="عدد العناصر في الصفحة")
+):
+    """للمديرين فقط - عرض جميع الجلسات النشطة مع معلومات المستخدمين"""
+    conn = None
+    try:
+        # حساب الإزاحة للترقيم الصفحي
+        offset = (page - 1) * per_page
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # استعلام العد الكلي
+        cursor.execute("""
+            SELECT COUNT(*) FROM user_sessions us
+            JOIN users u ON us.user_id = u.id
+            WHERE u.status != 'banned'
+        """)
+        total_count = cursor.fetchone()[0]
+
+        # جلب الجلسات من قاعدة البيانات مع معلومات المستخدم
+        cursor.execute("""
+            SELECT 
+                us.id as session_id,
+                us.token,
+                us.created_at,
+                u.id as user_id,
+                u.phone,
+                u.first_name,
+                u.last_name,
+                u.type as user_type,
+                ud.ip_address,
+                ud.device_name,
+                ud.os,
+                ud.browser,
+                ud.country,
+                ud.city
+            FROM user_sessions us
+            JOIN users u ON us.user_id = u.id
+            LEFT JOIN user_devices ud ON (
+                ud.user_id = u.id AND 
+                ud.login_time = (
+                    SELECT MAX(login_time) 
+                    FROM user_devices 
+                    WHERE user_id = u.id
+                )
+            )
+            WHERE u.status != 'banned'
+            ORDER BY us.created_at DESC
+            LIMIT ? OFFSET ?
+        """, (per_page, offset))
+
+        db_sessions = []
+        for row in cursor.fetchall():
+            db_sessions.append({
+                "session_id": row[0],
+                "token": row[1],
+                "login_time": row[2],
+                "user_id": row[3],
+                "phone": row[4],
+                "user_name": f"{row[5] or ''} {row[6] or ''}".strip(),
+                "user_type": "مدير" if row[7] == 1 else "مستخدم عادي",
+                "device_info": {
+                    "ip_address": row[8],
+                    "device_name": row[9],
+                    "os": row[10],
+                    "browser": row[11],
+                    "country": row[12],
+                    "city": row[13]
+                },
+                "source": "database"
+            })
+
+        # جلب الجلسات من الذاكرة المؤقتة عبر TokenHandler
+        memory_sessions = []
+        # استخدم الطريقة get_all_sessions الموجودة في TokenHandler
+        raw_memory_sessions = TokenHandler.get_all_sessions()
+
+        for session in raw_memory_sessions:
+            memory_sessions.append({
+                "token": session["token"],
+                "login_time": session["login_time"],
+                "user_id": session["user_id"],
+                "user_type": "مدير" if session["user_type"] == 1 else "مستخدم عادي",
+                "device_info": session.get("device_info", {}),
+                "source": "memory_cache"
+            })
+
+        all_sessions = db_sessions + [
+            s for s in memory_sessions
+            if not any(ds['token'] == s['token'] for ds in db_sessions)
+        ]
+
+        return {
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": (total_count + per_page - 1) // per_page,
+            "sessions": all_sessions,
+            "stats": {
+                "database_sessions": len(db_sessions),
+                "memory_cache_sessions": len(memory_sessions),
+                "active_sessions": len(all_sessions)
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"فشل في جلب الجلسات: {str(e)}"
         )
     finally:
         if conn:
