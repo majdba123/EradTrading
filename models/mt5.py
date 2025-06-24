@@ -14,6 +14,8 @@ def create_mt5_accounts_table():
             mt5_password TEXT NOT NULL,
             mt5_investor_password TEXT NOT NULL,
             account_type TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',  -- pending, approved, rejected, banned
+
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )

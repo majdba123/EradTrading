@@ -5,27 +5,29 @@ from schemas.users import UserLogin, UserRegister, TokenResponse
 from auth import TokenHandler, auth_scheme
 from helpers.otp_helper import OTPHelper
 from helpers.otp_session import otp_session_manager
+from fastapi import Request
+from helpers.device_info import get_device_info
 
 router = APIRouter(tags=["Authentication"])
 
 # كلمة المرور الثابتة لجميع المستخدمين
 FIXED_PASSCODE = "123456"
 
-@router.post("/register", response_model=TokenResponse, summary="إنشاء حساب جديد")
-async def register(user: UserRegister):
+
+@router.post("/register", response_model=TokenResponse, summary="Create new account")
+async def register(user: UserRegister, request: Request):
     """
-    إنشاء حساب جديد للمستخدم مع المعلومات الأساسية:
-    - **phone**: رقم الهاتف (يجب أن يكون فريداً)
-    - **passcode**: سيتم تجاهل هذا الحقل وسيتم تعيين كلمة المرور كـ 123456
-    - **first_name**: الاسم الأول
-    - **last_name**: الاسم الأخير
+    Register a new user account (requires admin approval):
+    - **phone**: Phone number (must be unique)
+    - **first_name**: First name
+    - **last_name**: Last name
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود المستخدم مسبقاً
+        # Check if user already exists
         cursor.execute(
             "SELECT id FROM users WHERE phone = ?",
             (user.phone,)
@@ -35,31 +37,34 @@ async def register(user: UserRegister):
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="رقم الهاتف مسجل بالفعل"
+                detail="Phone number already registered"
             )
 
-        # إنشاء حساب جديد مع كلمة المرور الثابتة
+        # Create new account with fixed password and 'pending_approval' status
         cursor.execute(
             """INSERT INTO users 
             (phone, passcode, first_name, last_name, type, status) 
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (user.phone, FIXED_PASSCODE, user.first_name, user.last_name, 0, 'pending')
+            (user.phone, FIXED_PASSCODE, user.first_name,
+             user.last_name, 0, 'pending_approval')
         )
         user_id = cursor.lastrowid
         conn.commit()
 
-        # حذف أي جلسات OTP قديمة للمستخدم
+        # Delete any old OTP sessions
         otp_session_manager.delete_user_sessions(user_id)
 
-        # إرسال OTP وتخزينه
+        # Send OTP
         session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
 
-        token = TokenHandler.create_session(user_id, 0)
+        token = TokenHandler.create_session(user_id, 0, request)
+
         return {
             "access_token": token,
-            "message": "تم إنشاء الحساب بنجاح. تم إرسال رمز التحقق OTP",
+            "message": "Account created successfully. Waiting for admin approval. OTP verification code sent.",
             "user_type": 0,
-            "otp_required": True
+            "otp_required": True,
+            "status": "pending_approval"
         }
 
     except HTTPException as he:
@@ -67,18 +72,19 @@ async def register(user: UserRegister):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل إنشاء الحساب: {str(e)}"
+            detail=f"Registration failed: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
 
-@router.post("/login", response_model=TokenResponse, summary="تسجيل الدخول")
-async def login(user: UserLogin):
+
+@router.post("/login", response_model=TokenResponse, summary="User login")
+async def login(user: UserLogin, request: Request):
     """
-    تسجيل الدخول للحساب الموجود:
-    - **phone**: رقم الهاتف المسجل
-    - **passcode**: سيتم تجاهل هذا الحقل وسيتم التحقق مقابل كلمة المرور الثابتة 123456
+    Login to existing account:
+    - **phone**: Registered phone number
+    - **passcode**: Will be ignored (using fixed passcode)
     """
     conn = None
     try:
@@ -94,38 +100,46 @@ async def login(user: UserLogin):
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="رقم الهاتف غير مسجل"
+                detail="Phone number not registered"
             )
 
         user_id, stored_passcode, user_status, user_type = user_data
-        
+
         if FIXED_PASSCODE != stored_passcode:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="كلمة المرور غير صحيحة"
+                detail="Invalid credentials"
+            )
+
+        if user_status == 'pending_approval':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is pending admin approval"
             )
 
         if user_status == 'rejected':
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="الحساب مرفوض"
+                detail="Your account has been rejected"
             )
 
-        # حذف أي جلسات OTP قديمة للمستخدم
+        if user_status == 'banned':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has been banned"
+            )
+
+        # Delete any old OTP sessions
         otp_session_manager.delete_user_sessions(user_id)
 
-        # إرسال OTP وتخزينه للمستخدم الموجود
+        # Send OTP
         session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
 
-        token = TokenHandler.create_session(user_id, user_type)
-
-        message = "تم إرسال رمز التحقق OTP"
-        if user_status == 'pending':
-            message = "الحساب قيد الانتظار للموافقة. تم إرسال رمز التحقق OTP"
+        token = TokenHandler.create_session(user_id, user_type, request)
 
         return {
             "access_token": token,
-            "message": message,
+            "message": "OTP verification code sent",
             "user_type": user_type,
             "otp_required": True
         }
@@ -135,11 +149,12 @@ async def login(user: UserLogin):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل تسجيل الدخول: {str(e)}"
+            detail=f"Login failed: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
+
 
 @router.post("/verify-otp", summary="تحقق من رمز OTP")
 async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
@@ -170,6 +185,7 @@ async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
             detail=f"فشل التحقق من OTP: {str(e)}"
         )
 
+
 @router.post("/logout", summary="تسجيل الخروج")
 async def logout(user_data: dict = Depends(auth_scheme)):
     """
@@ -197,6 +213,7 @@ async def logout(user_data: dict = Depends(auth_scheme)):
             detail=f"فشل تسجيل الخروج: {str(e)}"
         )
 
+
 @router.get("/check-auth", summary="فحص حالة المصادقة")
 async def check_auth(user_data: dict = Depends(auth_scheme)):
     """
@@ -207,3 +224,47 @@ async def check_auth(user_data: dict = Depends(auth_scheme)):
         "user_id": user_data["user_id"],
         "user_type": user_data["user_type"]
     }
+
+
+@router.get("/devices", summary="الحصول على أجهزة المستخدم")
+async def get_user_devices(user_data: dict = Depends(auth_scheme)):
+    """الحصول على سجل أجهزة المستخدم"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """SELECT ip_address, device_name, device_type, os, browser, country, city, login_time 
+               FROM user_devices 
+               WHERE user_id = ?
+               ORDER BY login_time DESC""",
+            (user_data["user_id"],)
+        )
+
+        devices = []
+        for row in cursor.fetchall():
+            devices.append({
+                "ip_address": row[0],
+                "device_name": row[1],
+                "device_type": row[2],
+                "os": row[3],
+                "browser": row[4],
+                "country": row[5],
+                "city": row[6],
+                "login_time": row[7]
+            })
+
+        return {
+            "success": True,
+            "devices": devices
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"فشل في جلب بيانات الأجهزة: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
