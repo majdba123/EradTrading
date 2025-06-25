@@ -726,3 +726,4 @@ async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Trading disable failed: {e.message}"
         )
+ 
