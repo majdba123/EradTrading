@@ -6,12 +6,20 @@ from admin_auth import admin_scheme
 from typing import Optional
 from pydantic import BaseModel
 from auth import TokenHandler
+from typing import  List
+
+from auth import auth_scheme
 
 
 router = APIRouter(
     prefix="/admin",
     tags=["Admin"]
 )
+
+
+class UserNotificationCreate(BaseModel):
+    user_id: int
+    message: str
 
 
 @router.post("/add-manager")
@@ -961,3 +969,134 @@ async def get_all_active_sessions(
     finally:
         if conn:
             conn.close()
+
+
+# @router.post("/user-notifications", status_code=201)
+# async def create_user_notification(
+#     notification: UserNotificationCreate,
+#     admin_data: dict = Depends(auth_scheme)
+# ):
+#     """إنشاء إشعار لمستخدم معين (بواسطة الأدمن)"""
+#     if admin_data["user_type"] != 1:
+#         raise HTTPException(
+#             status_code=403, detail="Only admins can create user notifications")
+
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+
+#         # التحقق من وجود المستخدم
+#         cursor.execute("SELECT 1 FROM users WHERE id = ?",
+#                        (notification.user_id,))
+#         if not cursor.fetchone():
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # إدراج الإشعار
+#         cursor.execute(
+#             """INSERT INTO notifications 
+#             (user_id, sender_id, message, is_admin) 
+#             VALUES (?, ?, ?, ?)""",
+#             (notification.user_id,
+#              admin_data["user_id"], notification.message, False)
+#         )
+#         conn.commit()
+
+#         return {
+#             "success": True,
+#             "message": "User notification created successfully",
+#             "notification_id": cursor.lastrowid
+#         }
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to create user notification: {str(e)}"
+#         )
+#     finally:
+#         if conn:
+#             conn.close()
+
+
+# @router.get("/user-notifications/{user_id}", response_model=List[dict])
+# async def get_user_notifications_admin(
+#     user_id: int,
+#     admin_data: dict = Depends(auth_scheme)
+# ):
+#     """الحصول على إشعارات مستخدم معين (للأدمن)"""
+#     if admin_data["user_type"] != 1:
+#         raise HTTPException(
+#             status_code=403, detail="Only admins can view user notifications")
+
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+
+#         cursor.execute(
+#             """SELECT n.id, n.message, n.is_read, n.created_at, 
+#                u.first_name || ' ' || u.last_name as sender_name
+#             FROM notifications n
+#             JOIN users u ON n.sender_id = u.id
+#             WHERE n.user_id = ? AND n.is_admin = 0
+#             ORDER BY n.created_at DESC""",
+#             (user_id,)
+#         )
+
+#         notifications = []
+#         for row in cursor.fetchall():
+#             notifications.append({
+#                 "id": row[0],
+#                 "message": row[1],
+#                 "is_read": bool(row[2]),
+#                 "created_at": row[3],
+#                 "sender": row[4]
+#             })
+
+#         return notifications
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to fetch user notifications: {str(e)}"
+#         )
+#     finally:
+#         if conn:
+#             conn.close()
+
+
+# @router.delete("/user-notifications/{notification_id}")
+# async def delete_user_notification_admin(
+#     notification_id: int,
+#     admin_data: dict = Depends(auth_scheme)
+# ):
+#     """حذف إشعار مستخدم (بواسطة الأدمن)"""
+#     if admin_data["user_type"] != 1:
+#         raise HTTPException(
+#             status_code=403, detail="Only admins can delete user notifications")
+
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+
+#         cursor.execute(
+#             "DELETE FROM notifications WHERE id = ? AND is_admin = 0",
+#             (notification_id,)
+#         )
+#         conn.commit()
+
+#         if cursor.rowcount == 0:
+#             raise HTTPException(
+#                 status_code=404, detail="User notification not found")
+
+#         return {
+#             "success": True,
+#             "message": "User notification deleted successfully"
+#         }
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to delete user notification: {str(e)}"
+#         )
+#     finally:
+#         if conn:
+#             conn.close()

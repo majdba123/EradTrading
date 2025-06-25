@@ -7,6 +7,8 @@ from helpers.otp_helper import OTPHelper
 from helpers.otp_session import otp_session_manager
 from fastapi import Request
 from helpers.device_info import get_device_info
+from typing import List
+
 
 router = APIRouter(tags=["Authentication"])
 
@@ -268,3 +270,81 @@ async def get_user_devices(user_data: dict = Depends(auth_scheme)):
     finally:
         if conn:
             conn.close()
+
+
+# @router.get("/user/notifications", response_model=List[dict])
+# async def get_user_notifications(
+#     user_data: dict = Depends(auth_scheme)
+# ):
+#     """الحصول على جميع إشعارات المستخدم (الخاصة به)"""
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+
+#         cursor.execute(
+#             """SELECT n.id, n.message, n.is_read, n.created_at, 
+#                u.first_name || ' ' || u.last_name as sender_name
+#             FROM notifications n
+#             JOIN users u ON n.sender_id = u.id
+#             WHERE n.user_id = ? AND n.is_admin = 0
+#             ORDER BY n.created_at DESC""",
+#             (user_data["user_id"],)
+#         )
+
+#         notifications = []
+#         for row in cursor.fetchall():
+#             notifications.append({
+#                 "id": row[0],
+#                 "message": row[1],
+#                 "is_read": bool(row[2]),
+#                 "created_at": row[3],
+#                 "sender": row[4]
+#             })
+
+#         return notifications
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to fetch notifications: {str(e)}"
+#         )
+#     finally:
+#         if conn:
+#             conn.close()
+
+
+# @router.put("/user/notifications/{notification_id}/read")
+# async def mark_notification_as_read(
+#     notification_id: int,
+#     user_data: dict = Depends(auth_scheme)
+# ):
+#     """تحديث حالة الإشعار كمقروء"""
+#     conn = None
+#     try:
+#         conn = get_db_connection()
+#         cursor = conn.cursor()
+
+#         cursor.execute(
+#             """UPDATE notifications 
+#             SET is_read = 1 
+#             WHERE id = ? AND user_id = ?""",
+#             (notification_id, user_data["user_id"])
+#         )
+#         conn.commit()
+
+#         if cursor.rowcount == 0:
+#             raise HTTPException(
+#                 status_code=404, detail="Notification not found or not owned by you")
+
+#         return {
+#             "success": True,
+#             "message": "Notification marked as read"
+#         }
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to update notification: {str(e)}"
+#         )
+#     finally:
+#         if conn:
+#             conn.close()
