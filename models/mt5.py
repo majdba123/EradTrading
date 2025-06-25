@@ -17,6 +17,7 @@ def create_mt5_accounts_table():
             status TEXT DEFAULT 'pending',  -- pending, approved, rejected, banned
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
+
         )
         """)
         

@@ -49,15 +49,29 @@ async def create_mt5_account(
     """
     إنشاء حساب جديد في MT5 مع **تشفير كلمات المرور**.
     يتم التحقق من صلاحية الوصول أولاً قبل تنفيذ العملية.
+    يمكن للمستخدم إنشاء أكثر من حساب.
     """
-    # لا حاجة لفحص has_permission هنا لأنه تم التحقق منه في Depends
-
     client = get_mt5_client()
     conn = None
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # التحقق من وجود نوع الحساب في جدول account_types
+        cursor.execute(
+            "SELECT id FROM account_types WHERE name = ?",
+            (account_data["account_type"],)
+        )
+        account_type = cursor.fetchone()
+
+        if not account_type:
+            raise HTTPException(
+                status_code=400,
+                detail="نوع الحساب غير صالح. الرجاء اختيار نوع حساب موجود."
+            )
+
+        # جلب بيانات المستخدم
         cursor.execute(
             "SELECT first_name, last_name FROM users WHERE id = ?",
             (user_data["user_id"],)
@@ -70,11 +84,14 @@ async def create_mt5_account(
         first_name, last_name = user
 
         # إنشاء الحساب في MT5 (معلق حالياً)
-        # result = client.create_account(
-        #     first_name=first_name,
-        #     last_name=last_name,
-        #     account_type=account_data["account_type"]
-        # )
+        result = client.create_account(
+            first_name=first_name,
+            last_name=last_name,
+            account_type=account_data["account_type"]
+        )
+        encrypted_password = cipher.encrypt_password(result["password"])
+        encrypted_investor_password = cipher.encrypt_password(
+            result["investor_password"])
 
         # تخزين بيانات الحساب في قاعدة البيانات
         cursor.execute(
@@ -83,9 +100,9 @@ async def create_mt5_account(
             VALUES (?, ?, ?, ?, ?)""",
             (
                 user_data["user_id"],
-                0,  # mt5_login_id مؤقت
-                0,  # mt5_password مؤقت
-                0,  # mt5_investor_password مؤقت
+                result["login"],
+                encrypted_password,
+                encrypted_investor_password,
                 account_data["account_type"]
             )
         )
@@ -93,26 +110,25 @@ async def create_mt5_account(
 
         return {
             "success": True,
-            "message": "MT5 account created successfully",
+            "message": "تم إنشاء حساب MT5 بنجاح",
         }
 
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        # تم تعديل هذه الرسالة لأننا نسمح بأكثر من حساب
         raise HTTPException(
             status_code=400,
-            detail="An MT5 account already exists for this user."
+            detail=f"حدث خطأ في إنشاء الحساب: {str(e)}"
         )
     except HTTPException:
-        # إعادة رفع أي استثناءات HTTP كما هي
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
-
 ####################################################################################################################################################
 ####################################################################################################################################################
 ####################################################################################################################################################
@@ -726,4 +742,3 @@ async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme)
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Trading disable failed: {e.message}"
         )
- 

@@ -39,7 +39,7 @@ def add_manager(
         # 1. إنشاء حساب المستخدم (مدير)
         cursor.execute(
             """INSERT INTO users (phone, passcode, type, status)
-               VALUES (?, ?, 1, 'active')""",
+               VALUES (?, ?, 2, 'active')""",
             (manager_data.phone, manager_data.passcode)
         )
         user_id = cursor.lastrowid

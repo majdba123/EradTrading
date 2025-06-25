@@ -37,3 +37,8 @@ def create_manager_assignments_table():
     
     conn.commit()
     conn.close()
+
+
+
+
+    

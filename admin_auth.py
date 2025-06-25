@@ -33,7 +33,7 @@ class AdminBearer:
             if not cursor.fetchone():
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="يجب أن تكون مديراً للوصول إلى هذه الصلاحية"
+                    detail="يجب أن تكون admin للوصول إلى هذه الصلاحية"
                 )
 
             return user_data
