@@ -1,6 +1,6 @@
 # seeder/user_seeder.py
 from database.connection import get_db_connection
-
+import sqlite3
 
 def seed_users():
     conn = get_db_connection()
@@ -11,15 +11,16 @@ def seed_users():
         'phone': '0123456789',
         'passcode': '123456',
         'status': 'approved',
-        'type': 1
+        'type': 1,
+        'password': '123456789',
     }
 
     try:
         cursor.execute("""
-        INSERT INTO users (phone, passcode, status, type)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO users (phone, passcode, status, type,password)
+        VALUES (?, ?, ?, ?,?)
         """, (default_user['phone'], default_user['passcode'],
-              default_user['status'], default_user['type']))
+              default_user['status'], default_user['type'],default_user['password']))
 
         conn.commit()
         print("User seeded successfully!")

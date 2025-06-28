@@ -4,11 +4,14 @@ from typing import Optional
 class UserLogin(BaseModel):
     phone: str
     passcode: str
+    password: str  # Changed from passcode to password
+
 
 class UserRegister(BaseModel):
     phone: str
     first_name: str
     last_name: str
+    password: str
 
 class TokenResponse(BaseModel):
     access_token: str

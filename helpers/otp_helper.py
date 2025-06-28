@@ -2,9 +2,35 @@ from .otp_session import otp_session_manager
 import requests
 from typing import Optional, Dict
 from fastapi import HTTPException, status
+from SCBClient import SCBClient, SCBAPIError, AuthenticationError
+import json
+from Securityy.permission_checker import check_permission
+from Securityy.user_permission_checker import UserPermissionChecker
+
+
+
+SCB_BASE_URL = "https://scb.erad-markets.com"
+SCB_ADMIN_USER = "admin"
+SCB_ADMIN_PASS = "nani*&H#*$HDJbhdb3746bybHBSHDJG&3gnfjenjkbyfv76G673G4UBBEKBF8"
+
+def get_mt5_client():
+        """Helper function to get authenticated MT5 client"""
+        client = SCBClient(base_url=SCB_BASE_URL, logger_level="OFF")
+        try:
+            client.authenticate(SCB_ADMIN_USER, SCB_ADMIN_PASS)
+            return client
+        except AuthenticationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to connect to MT5 service: {str(e)}"
+            )
+
 
 
 class OTPHelper:
+
+
+
     @staticmethod
     def send_and_store_otp(user_id: int, phone_number: str) -> str:
         """
@@ -25,14 +51,29 @@ class OTPHelper:
 
     @staticmethod
     def _get_otp_from_external_service(phone_number: str) -> str:
-        """الحصول على OTP من الخدمة الخارجية"""
-        response = requests.post(
-            "https://external-otp-service.com/send",
-            json={"phone": phone_number},
-            timeout=5
-        )
-        response.raise_for_status()
-        return response.json()['otp']
+        try:
+                phone = phone_number
+                if not phone:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Phone number must be provided."
+                )
+
+                client = get_mt5_client()
+                result = client.send_otp(phone)
+                print(result)
+                return {
+                    "otp": result.get("otp_ref"),  # مرجع للتحقق لاحقاً
+                }
+        
+        except SCBAPIError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to send code: {e}"
+                )
+
+
+
 
     @staticmethod
     def verify_otp_for_user(user_id: int, otp: str) -> bool:

@@ -8,6 +8,8 @@ from helpers.otp_session import otp_session_manager
 from fastapi import Request
 from helpers.device_info import get_device_info
 from typing import List
+from security import cipher  # استيراد كائن التشفير
+
 
 
 router = APIRouter(tags=["Authentication"])
@@ -41,14 +43,14 @@ async def register(user: UserRegister, request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Phone number already registered"
             )
-
+        encrypted_password = cipher.encrypt_password(user.password)
         # Create new account with fixed password and 'pending_approval' status
         cursor.execute(
             """INSERT INTO users 
-            (phone, passcode, first_name, last_name, type, status) 
-            VALUES (?, ?, ?, ?, ?, ?)""",
+            (phone, passcode, first_name, last_name, type, status, password) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (user.phone, FIXED_PASSCODE, user.first_name,
-             user.last_name, 0, 'pending_approval')
+            user.last_name, 0, 'pending_approval', encrypted_password)
         )
         user_id = cursor.lastrowid
         conn.commit()
@@ -86,15 +88,17 @@ async def login(user: UserLogin, request: Request):
     """
     Login to existing account:
     - **phone**: Registered phone number
-    - **passcode**: Will be ignored (using fixed passcode)
+    - **password**: User's password (required)
+    - **passcode**: Will be ignored (legacy field)
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Get user data including stored password
         cursor.execute(
-            "SELECT id, passcode, status, type FROM users WHERE phone = ?",
+            "SELECT id, password, status, type FROM users WHERE phone = ?",
             (user.phone,)
         )
         user_data = cursor.fetchone()
@@ -105,13 +109,17 @@ async def login(user: UserLogin, request: Request):
                 detail="Phone number not registered"
             )
 
-        user_id, stored_passcode, user_status, user_type = user_data
-
-        if FIXED_PASSCODE != stored_passcode:
+        user_id, stored_password, user_status, user_type = user_data
+        encrypted_password = cipher.decrypt_password(stored_password)
+        print(encrypted_password)
+        print(stored_password)
+        print(user.password)
+        # Verify password
+        if not user.password == encrypted_password:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
-            )
+            ) 
 
         if user_status == 'pending_approval':
             raise HTTPException(
@@ -156,7 +164,6 @@ async def login(user: UserLogin, request: Request):
     finally:
         if conn:
             conn.close()
-
 
 @router.post("/verify-otp", summary="تحقق من رمز OTP")
 async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):

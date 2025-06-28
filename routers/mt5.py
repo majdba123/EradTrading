@@ -320,7 +320,7 @@ async def send_otp(
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to send code: {e.message}"
+            detail=f"Failed to send code: {e}"
         )
 
 
