@@ -7,10 +7,11 @@ from typing import Optional
 from pydantic import BaseModel
 from auth import TokenHandler
 from typing import  List
-
+from fastapi import APIRouter, Depends, HTTPException, status
+from websocket_manager import websocket_manager  # استيراد مدير WebSocket
 from auth import auth_scheme
-
-
+import json  # استيراد json هنا أيضاً
+import asyncio
 router = APIRouter(
     prefix="/admin",
     tags=["Admin"]
@@ -831,6 +832,20 @@ def reject_user_account(
         )
 
         conn.commit()
+        
+        notification_channel = f"private_notification_{user_id}"
+        notification_message = json.dumps({
+            "type": "account_rejected",
+            "message": "تم رفض حسابك من قبل المسؤول",
+            "user_id": user_id,
+            "status": "rejected"
+        })
+        
+        # هذا سيرسل الإشعار إلى جميع الاتصالات المشتركة في القناة
+        await websocket_manager.send_personal_message(
+            notification_message,
+            notification_channel
+        )
 
         return {
             "success": True,
