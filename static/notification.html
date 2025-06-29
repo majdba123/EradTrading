@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Account Rejection Test (User ID=2)</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
+            line-height: 1.6;
         }
+
         .notification {
             position: fixed;
             top: 20px;
@@ -19,93 +22,248 @@
             border-radius: 5px;
             display: none;
             z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            max-width: 300px;
         }
+
         .connection-status {
             padding: 10px;
             margin: 20px 0;
             border-radius: 5px;
+            font-weight: bold;
         }
-        .connected { background: #e6f7e6; color: #2d572d; }
-        .disconnected { background: #ffebee; color: #c62828; }
+
+        .connected {
+            background: #e6f7e6;
+            color: #2d572d;
+        }
+
+        .disconnected {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .connecting {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
         #console {
             background: #f5f5f5;
             padding: 15px;
             border-radius: 5px;
             font-family: monospace;
-            height: 200px;
+            height: 300px;
             overflow-y: auto;
+            white-space: pre-wrap;
+            border: 1px solid #ddd;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+
+        .log-error {
+            color: #d32f2f;
+        }
+
+        .log-success {
+            color: #388e3c;
+        }
+
+        .log-warning {
+            color: #ffa000;
+        }
+
+        .log-info {
+            color: #1976d2;
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #1565c0;
+        }
+
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
         }
     </style>
 </head>
+
 <body>
     <h1>Account Rejection Test</h1>
     <p>Testing WebSocket notifications for <strong>User ID=2</strong></p>
-    
+
     <div id="connection-status" class="connection-status disconnected">
         ❌ Disconnected from WebSocket
     </div>
-    
+
     <div id="notification" class="notification"></div>
-    
+
+    <div class="controls">
+        <button id="connect-btn">Connect WS</button>
+        <button id="disconnect-btn">Disconnect WS</button>
+        <button id="test-notification-btn">Test Notification</button>
+        <button id="clear-log-btn">Clear Log</button>
+    </div>
+
     <h3>Connection Log:</h3>
     <div id="console"></div>
 
     <script>
-        const userId = 2; // Hardcoded for testing
+        const userId = 2;
         const statusEl = document.getElementById('connection-status');
         const notificationEl = document.getElementById('notification');
         const consoleEl = document.getElementById('console');
-        
-        function log(message) {
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const testNotificationBtn = document.getElementById('test-notification-btn');
+        const clearLogBtn = document.getElementById('clear-log-btn');
+
+        let socket = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        const reconnectDelay = 3000;
+
+        function log(message, type = 'info') {
             const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
             entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
             consoleEl.appendChild(entry);
             consoleEl.scrollTop = consoleEl.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
         }
-        
-        // WebSocket connection
+
+        function updateStatus(status, message) {
+            statusEl.textContent = message;
+            statusEl.className = `connection-status ${status}`;
+        }
+
+        function showNotification(message, duration = 5000) {
+            notificationEl.textContent = message;
+            notificationEl.style.display = 'block';
+            setTimeout(() => {
+                notificationEl.style.display = 'none';
+            }, duration);
+        }
+
         function connectWebSocket() {
-            const socket = new WebSocket(`ws://${window.location.hostname}:8000/ws/${userId}`);
-            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                log('WebSocket already connected', 'warning');
+                return;
+            }
+
+            updateStatus('connecting', '🔄 Connecting to WebSocket...');
+            log(`Attempting to connect to WebSocket for user ${userId}`, 'info');
+
+            const socketUrl = `ws://${window.location.hostname}:8000/ws/${userId}`;
+            socket = new WebSocket(socketUrl);
+
             socket.onopen = () => {
-                statusEl.textContent = "✅ Connected to WebSocket (User ID=2)";
-                statusEl.className = "connection-status connected";
-                log("WebSocket connection established");
+                reconnectAttempts = 0;
+                updateStatus('connected', '✅ Connected to WebSocket');
+                log('WebSocket connection established successfully', 'success');
+                showNotification('WebSocket connected successfully', 3000);
             };
-            
+
             socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                log(`Received message: ${JSON.stringify(data)}`);
-                
-                if (data.type === 'account_rejected') {
-                    notificationEl.textContent = data.message;
-                    notificationEl.style.display = 'block';
-                    
-                    setTimeout(() => {
-                        notificationEl.style.display = 'none';
-                    }, 5000);
+                log(`Received raw message: ${event.data}`, 'info');
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`Parsed message: ${JSON.stringify(data, null, 2)}`, 'info');
+
+                    if (data.type === 'account_rejected') {
+                        showNotification(data.message);
+                        log('Account rejection notification received', 'success');
+                    }
+                } catch (e) {
+                    log(`Error parsing message: ${e}`, 'error');
                 }
             };
-            
+
             socket.onerror = (error) => {
-                statusEl.textContent = "❌ WebSocket Error - Retrying in 3 seconds...";
-                statusEl.className = "connection-status disconnected";
-                log(`Connection error: ${error.type}`);
-                setTimeout(connectWebSocket, 3000);
+                log(`WebSocket error: ${JSON.stringify(error)}`, 'error');
+                updateStatus('disconnected', '❌ WebSocket Error');
+                attemptReconnect();
             };
-            
-            socket.onclose = () => {
-                statusEl.textContent = "⚠️ Connection Closed - Reconnecting...";
-                statusEl.className = "connection-status disconnected";
-                log("WebSocket connection closed");
-                setTimeout(connectWebSocket, 3000);
+
+            socket.onclose = (event) => {
+                log(`WebSocket closed: Code=${event.code}, Reason=${event.reason || 'none'}`, 'warning');
+                updateStatus('disconnected', '⚠️ WebSocket Disconnected');
+                if (event.code !== 1000) { // 1000 is normal closure
+                    attemptReconnect();
+                }
             };
         }
-        
+
+        function disconnectWebSocket() {
+            if (socket) {
+                log('Closing WebSocket connection...', 'info');
+                socket.close(1000, 'User requested disconnect');
+                socket = null;
+            } else {
+                log('No active WebSocket connection to disconnect', 'warning');
+            }
+        }
+
+        function attemptReconnect() {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`, 'warning');
+                setTimeout(connectWebSocket, reconnectDelay);
+            } else {
+                log('Max reconnection attempts reached. Please refresh the page.', 'error');
+                updateStatus('disconnected', '❌ Failed to reconnect');
+            }
+        }
+
+        function sendTestNotification() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const testMsg = {
+                    type: 'test_notification',
+                    message: 'This is a test notification from the browser',
+                    timestamp: new Date().toISOString()
+                };
+                socket.send(JSON.stringify(testMsg));
+                log('Sent test notification to server', 'info');
+            } else {
+                log('Cannot send test notification - WebSocket not connected', 'error');
+            }
+        }
+
+        // Event listeners
+        connectBtn.addEventListener('click', connectWebSocket);
+        disconnectBtn.addEventListener('click', disconnectWebSocket);
+        testNotificationBtn.addEventListener('click', sendTestNotification);
+        clearLogBtn.addEventListener('click', () => {
+            consoleEl.innerHTML = '';
+            log('Log cleared', 'info');
+        });
+
         // Initial connection
-        log("Attempting to connect to WebSocket...");
         connectWebSocket();
+
+        // Add heartbeat to keep connection alive
+        setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'heartbeat' }));
+            }
+        }, 30000);
     </script>
 </body>
+
 </html>

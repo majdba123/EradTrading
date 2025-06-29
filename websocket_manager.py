@@ -27,18 +27,24 @@ class ConnectionManager:
 
     async def send_personal_notification(self, user_id: str, message: dict):
         channel = f"user_{user_id}"
+        print(f"Looking for channel: {channel}")  # Add this
+        print(f"Active connections: {self.active_connections}")  # Add this
         async with self.lock:
             if channel in self.active_connections:
+                print(f"Found channel {channel} with {len(self.active_connections[channel])} connections")  # Add this
                 disconnected = []
                 message_str = json.dumps(message)
                 for ws in self.active_connections[channel]:
                     try:
                         await ws.send_text(message_str)
+                        print(f"Message sent to websocket: {message_str}")  # Add this
                     except WebSocketDisconnect:
                         disconnected.append(ws)
                 
                 for ws in disconnected:
                     self.active_connections[channel].remove(ws)
+            else:
+                print(f"Channel {channel} not found in active connections")  # Add this
 
 # Single shared instance
 websocket_manager = ConnectionManager()

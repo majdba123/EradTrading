@@ -6,13 +6,12 @@ router = APIRouter()
 
 @router.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    print(f"New WebSocket connection for user {user_id}")  # Add this
     await websocket_manager.connect(websocket, user_id)
     try:
         while True:
             data = await websocket.receive_text()
-            # Optional: Handle incoming messages if needed
+            print(f"Received from user {user_id}: {data}")  # Add this
     except WebSocketDisconnect:
-        await websocket_manager.disconnect(websocket, user_id)
-    except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"User {user_id} disconnected")  # Add this
         await websocket_manager.disconnect(websocket, user_id)

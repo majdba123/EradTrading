@@ -789,7 +789,6 @@ def approve_user_account(
     finally:
         if conn:
             conn.close()
-
 @router.post("/reject-account/{user_id}", summary="Reject user account")
 async def reject_user_account(
     user_id: int,
@@ -834,17 +833,19 @@ async def reject_user_account(
 
         conn.commit()
         
-        # Prepare notification
+        # Prepare notification - تأكد من أن user_id هو string
         notification = {
             "type": "account_rejected",
             "message": "Your account registration has been rejected by the administrator.",
             "timestamp": datetime.datetime.now().isoformat(),
-            "user_id": user_id
+            "user_id": str(user_id)  # تحويل إلى string هنا
         }
         
         # Send real-time notification
+        print(f"Attempting to send notification to user {user_id}")
         await websocket_manager.send_personal_notification(str(user_id), notification)
-
+        print("Notification sent successfully")
+        
         return {
             "success": True,
             "message": "Account rejected successfully",
@@ -862,6 +863,9 @@ async def reject_user_account(
     finally:
         if conn:
             conn.close()
+            
+            
+            
 @router.get("/sessions", summary="عرض جميع الجلسات النشطة")
 async def get_all_active_sessions(
     admin: dict = Depends(admin_scheme),
