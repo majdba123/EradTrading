@@ -1,3 +1,4 @@
+# connection_manager.py
 import json
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict, List
@@ -39,5 +40,5 @@ class ConnectionManager:
                 for ws in disconnected:
                     self.active_connections[channel].remove(ws)
 
-# إنشاء نسخة واحدة يتم مشاركتها
+# Single shared instance
 websocket_manager = ConnectionManager()

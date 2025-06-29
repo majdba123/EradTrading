@@ -10,6 +10,8 @@ from typing import  List
 from fastapi import APIRouter, Depends, HTTPException, status
 from websocket_manager import websocket_manager  # استيراد مدير WebSocket
 from auth import auth_scheme
+import datetime
+
 import json  # استيراد json هنا أيضاً
 import asyncio
 router = APIRouter(
@@ -788,9 +790,8 @@ def approve_user_account(
         if conn:
             conn.close()
 
-
 @router.post("/reject-account/{user_id}", summary="Reject user account")
-def reject_user_account(
+async def reject_user_account(
     user_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
@@ -819,7 +820,7 @@ def reject_user_account(
                 detail="Account is not pending approval"
             )
 
-        # Update user status to rejected and delete related data
+        # Update user status to rejected
         cursor.execute(
             "UPDATE users SET status = 'rejected' WHERE id = ?",
             (user_id,)
@@ -833,19 +834,16 @@ def reject_user_account(
 
         conn.commit()
         
-        notification_channel = f"private_notification_{user_id}"
-        notification_message = json.dumps({
+        # Prepare notification
+        notification = {
             "type": "account_rejected",
-            "message": "تم رفض حسابك من قبل المسؤول",
-            "user_id": user_id,
-            "status": "rejected"
-        })
+            "message": "Your account registration has been rejected by the administrator.",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user_id": user_id
+        }
         
-        # هذا سيرسل الإشعار إلى جميع الاتصالات المشتركة في القناة
-        await websocket_manager.send_personal_message(
-            notification_message,
-            notification_channel
-        )
+        # Send real-time notification
+        await websocket_manager.send_personal_notification(str(user_id), notification)
 
         return {
             "success": True,
@@ -864,8 +862,6 @@ def reject_user_account(
     finally:
         if conn:
             conn.close()
-
-
 @router.get("/sessions", summary="عرض جميع الجلسات النشطة")
 async def get_all_active_sessions(
     admin: dict = Depends(admin_scheme),
