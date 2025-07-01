@@ -1,5 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from database.connection import get_db_connection
+from websocket_manager import websocket_manager  # استيراد مدير WebSocket
+from auth import auth_scheme
+from datetime import datetime  # Add this import at the top of your file
+from models.notifications import store_notification
 from schemas.mt5 import (
     MT5AccountCreate,
     MT5AccountInfo,
@@ -12,6 +16,7 @@ from admin_auth import admin_scheme
 from SCBClient import SCBClient, SCBAPIError, AuthenticationError
 from security import cipher
 import sqlite3
+import asyncio
 
 router = APIRouter(
     prefix="/mt5",
@@ -45,6 +50,7 @@ async def admin_create_mt5_account(
 ):
     """
     Create MT5 account for user (Admin only)
+
     """
     conn = None
     try:
@@ -53,13 +59,13 @@ async def admin_create_mt5_account(
 
         # Verify user exists
         cursor.execute(
-            "SELECT first_name, last_name FROM users WHERE id = ?", (user_id,))
+            "SELECT first_name, last_name, phone FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        first_name, last_name = user
+        first_name, last_name, phone = user
 
         # Create account in MT5
         client = get_mt5_client()
@@ -88,10 +94,41 @@ async def admin_create_mt5_account(
             )
         )
         conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "mt5_account_created",
+            "message": f"تم إنشاء حساب MT5 لك بنجاح. رقم الحساب: {result['login']}",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": str(user_id),
+            "account_details": {
+                "login": result["login"],
+                "type": result["type"]
+            }
+        }
+
+        # إرسال إشعار الوقت الحقيقي
+        print(f"إرسال إشعار إنشاء حساب MT5 للمستخدم {user_id}")
+        await websocket_manager.send_personal_notification(str(user_id), notification)
+        print("تم إرسال الإشعار بنجاح")
+
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(
+                f"تم تخزين الإشعار في قاعدة البيانات بالرقم: {notification_id}")
+        except Exception as e:
+            print(f"فشل في تخزين الإشعار: {str(e)}")
+
+        conn.commit()
 
         return {
             "success": True,
-            "message": "MT5 account created successfully for user",
+            "message": "تم إنشاء حساب MT5 للمستخدم بنجاح",
             "user_id": user_id,
             "account_details": {
                 "login": result["login"],
@@ -102,14 +139,18 @@ async def admin_create_mt5_account(
         }
 
     except sqlite3.IntegrityError:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=400,
-            detail="User already has an MT5 account"
+            detail="المستخدم لديه حساب MT5 بالفعل"
         )
     except Exception as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
         )
     finally:
         if conn:
@@ -357,7 +398,8 @@ async def admin_change_mt5_password(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    Change MT5 account password (Admin only)
+
+    تغيير كلمة مرور حساب MT5 للمستخدم مع إرسال إشعار للمستخدم
     """
     conn = None
     try:
@@ -371,7 +413,7 @@ async def admin_change_mt5_password(
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=403,
-                detail="This account does not belong to the specified user"
+                detail="هذا الحساب لا ينتمي إلى المستخدم المحدد"
             )
 
         # Change password in MT5
@@ -387,7 +429,7 @@ async def admin_change_mt5_password(
         if not success:
             raise HTTPException(
                 status_code=400,
-                detail="MT5 password change failed"
+                detail="فشل تغيير كلمة مرور MT5"
             )
 
         # Update password in database
@@ -398,32 +440,69 @@ async def admin_change_mt5_password(
                 "UPDATE user_mt5_accounts SET mt5_password = ? WHERE user_id = ? AND mt5_login_id = ?",
                 (encrypted_password, user_id, login)
             )
+            password_type_arabic = "الرئيسية"
         else:  # INVESTOR
             cursor.execute(
                 "UPDATE user_mt5_accounts SET mt5_investor_password = ? WHERE user_id = ? AND mt5_login_id = ?",
                 (encrypted_password, user_id, login)
             )
+            password_type_arabic = "المستثمر"
+        conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "mt5_password_changed",
+            "message": f"تم تغيير كلمة المرور {password_type_arabic} لحساب MT5 الخاص بك (الحساب: {login})",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": str(user_id),
+            "account_details": {
+                "login": login,
+                "password_type": password_data.password_type
+            }
+        }
+
+        # إرسال إشعار الوقت الحقيقي
+        print(f"إرسال إشعار تغيير كلمة المرور للمستخدم {user_id}")
+        await websocket_manager.send_personal_notification(str(user_id), notification)
+        print("تم إرسال الإشعار بنجاح")
+
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(
+                f"تم تخزين الإشعار في قاعدة البيانات بالرقم: {notification_id}")
+        except Exception as e:
+            print(f"فشل في تخزين الإشعار: {str(e)}")
 
         conn.commit()
 
         return {
             "success": True,
-            "message": "Password changed successfully",
+            "message": "تم تغيير كلمة المرور بنجاح",
             "user_id": user_id,
             "login": login,
             "password_type": password_data.password_type,
             "new_password": new_password  # Return new password to admin
+
         }
 
     except SCBAPIError as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=400,
-            detail=f"MT5 password change failed: {e.message}"
+            detail=f"فشل تغيير كلمة مرور MT5: {e.message}"
         )
     except Exception as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
         )
     finally:
         if conn:
@@ -437,7 +516,8 @@ async def admin_enable_mt5_trading(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    Enable trading for user's MT5 account (Admin only)
+
+    تمكين التداول لحساب MT5 للمستخدم مع إرسال إشعار للمستخدم
     """
     conn = None
     try:
@@ -451,30 +531,81 @@ async def admin_enable_mt5_trading(
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=403,
-                detail="This account does not belong to the specified user"
+                detail="هذا الحساب لا ينتمي إلى المستخدم المحدد"
             )
 
-        # Enable trading
         client = get_mt5_client()
         result = client.enable_trading(login)
 
+        if not result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail="فشل في تمكين التداول لحساب MT5"
+            )
+
+        # تحديث حالة الحساب في قاعدة البيانات إذا لزم الأمر
+        cursor.execute(
+            "UPDATE user_mt5_accounts SET trading_enabled = 1 WHERE user_id = ? AND mt5_login_id = ?",
+            (user_id, login)
+        )
+        conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "trading_enabled",
+            "message": f"تم تمكين التداول لحسابك MT5 (رقم الحساب: {login})",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": str(user_id),
+            "account_details": {
+                "login": login,
+                "enabled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }
+
+        # إرسال إشعار الوقت الحقيقي
+        print(f"إرسال إشعار تمكين التداول للمستخدم {user_id}")
+        await websocket_manager.send_personal_notification(str(user_id), notification)
+        print("تم إرسال الإشعار بنجاح")
+
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(
+                f"تم تخزين الإشعار في قاعدة البيانات بالرقم: {notification_id}")
+        except Exception as e:
+            print(f"فشل في تخزين الإشعار: {str(e)}")
+
+        conn.commit()
+
         return {
             "success": True,
-            "message": "Trading enabled successfully",
+            "message": "تم تمكين التداول بنجاح",
             "user_id": user_id,
             "login": login,
-            "account_info": result
+            "account_info": {
+                "login": login,
+                "trading_enabled": True,
+                "enabled_at": datetime.now().isoformat()
+            }
         }
 
     except SCBAPIError as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to enable trading: {e.message}"
+            detail=f"فشل في تمكين التداول: {e.message}"
         )
     except Exception as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
         )
     finally:
         if conn:
@@ -580,6 +711,7 @@ async def admin_disable_mt5_trading(
 ):
     """
     Disable trading for user's MT5 account (Admin only)
+
     """
     conn = None
     try:
@@ -593,30 +725,81 @@ async def admin_disable_mt5_trading(
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=403,
-                detail="This account does not belong to the specified user"
+                detail="هذا الحساب لا ينتمي إلى المستخدم المحدد"
             )
 
-        # Disable trading
         client = get_mt5_client()
         result = client.disable_trading(login)
 
+        if not result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail="فشل في تعطيل التداول لحساب MT5"
+            )
+
+        # تحديث حالة الحساب في قاعدة البيانات
+        cursor.execute(
+            "UPDATE user_mt5_accounts SET trading_enabled = 0 WHERE user_id = ? AND mt5_login_id = ?",
+            (user_id, login)
+        )
+        conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "trading_disabled",
+            "message": f"تم تعطيل التداول لحسابك MT5 (رقم الحساب: {login})",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": str(user_id),
+            "account_details": {
+                "login": login,
+                "disabled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }
+
+        # إرسال إشعار الوقت الحقيقي
+        print(f"إرسال إشعار تعطيل التداول للمستخدم {user_id}")
+        await websocket_manager.send_personal_notification(str(user_id), notification)
+        print("تم إرسال الإشعار بنجاح")
+
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(
+                f"تم تخزين الإشعار في قاعدة البيانات بالرقم: {notification_id}")
+        except Exception as e:
+            print(f"فشل في تخزين الإشعار: {str(e)}")
+
+        conn.commit()
+
         return {
             "success": True,
-            "message": "Trading disabled successfully",
+            "message": "تم تعطيل التداول بنجاح",
             "user_id": user_id,
             "login": login,
-            "account_info": result
+            "account_info": {
+                "login": login,
+                "trading_enabled": False,
+                "disabled_at": datetime.now().isoformat()
+            }
         }
 
     except SCBAPIError as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to disable trading: {e.message}"
+            detail=f"فشل في تعطيل التداول: {e.message}"
         )
     except Exception as e:
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
         )
     finally:
         if conn:
