@@ -12,7 +12,7 @@ def create_users_table():
         first_name TEXT,
         last_name TEXT,
         status TEXT DEFAULT 'pending',  -- pending, approved, rejected, banned
-        type INTEGER DEFAULT 0,        -- 0: مستخدم عادي، 1: مسؤول
+        type INTEGER DEFAULT 0, 
         password TEXT NOT NULL,
 
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

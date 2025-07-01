@@ -11,7 +11,7 @@ def create_permissions_table():
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            required_permission TEXT,  -- نوع الصلاحية المطلوبة
+            required_permission TEXT,
             endpoint_name TEXT NOT NULL UNIQUE,
             endpoint_path TEXT NOT NULL UNIQUE,
             is_active INTEGER DEFAULT 1,  -- 1 for active, 0 for inactive

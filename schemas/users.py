@@ -12,6 +12,7 @@ class UserRegister(BaseModel):
     first_name: str
     last_name: str
     password: str
+    passcode: str
 
 class TokenResponse(BaseModel):
     access_token: str

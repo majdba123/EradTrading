@@ -7,151 +7,108 @@ from helpers.otp_helper import OTPHelper
 from helpers.otp_session import otp_session_manager
 from fastapi import Request
 from helpers.device_info import get_device_info
-from typing import List
-from security import cipher  # استيراد كائن التشفير
-
+from typing import List, Union
+from security import cipher  # Import encryption object
 
 
 router = APIRouter(tags=["Authentication"])
 
-# كلمة المرور الثابتة لجميع المستخدمين
-FIXED_PASSCODE = "123456"
+# Fixed password for all users
 
 
-@router.post("/register", response_model=TokenResponse, summary="Create new account")
-async def register(user: UserRegister, request: Request):
+@router.post("/auth", response_model=TokenResponse, summary="Unified authentication")
+async def authenticate(user_data: Union[UserLogin, UserRegister], request: Request):
     """
-    Register a new user account (requires admin approval):
+    Unified authentication endpoint:
+    - If phone exists: Verify credentials and login
+    - If phone doesn't exist: Register new account
+
+    For login (existing users):
+    - **phone**: Registered phone number
+    - **password**: User's password
+
+    For registration (new users):
     - **phone**: Phone number (must be unique)
     - **first_name**: First name
     - **last_name**: Last name
+    - **password**: User's password
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Check if user already exists
+        # Check if user exists
         cursor.execute(
-            "SELECT id FROM users WHERE phone = ?",
-            (user.phone,)
+            "SELECT id, password, status, type FROM users WHERE phone = ?",
+            (user_data.phone,)
         )
         existing_user = cursor.fetchone()
 
         if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Phone number already registered"
-            )
-        encrypted_password = cipher.encrypt_password(user.password)
-        # Create new account with fixed password and 'pending_approval' status
-        cursor.execute(
-            """INSERT INTO users 
-            (phone, passcode, first_name, last_name, type, status, password) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (user.phone, FIXED_PASSCODE, user.first_name,
-            user.last_name, 0, 'pending_approval', encrypted_password)
-        )
-        user_id = cursor.lastrowid
-        conn.commit()
+            # LOGIN FLOW
+            user_id, stored_password, user_status, user_type = existing_user
 
-        # Delete any old OTP sessions
+            # Verify password
+            encrypted_password = cipher.decrypt_password(stored_password)
+            if not user_data.password == encrypted_password:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid credentials"
+                )
+
+            # Check account status
+            if user_status == 'pending_approval':
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account is pending admin approval"
+                )
+            elif user_status == 'rejected':
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been rejected"
+                )
+            elif user_status == 'banned':
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been banned"
+                )
+
+        else:
+            # REGISTRATION FLOW
+            if not hasattr(user_data, 'first_name') or not hasattr(user_data, 'last_name'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="First name and last name are required for registration"
+                )
+
+            encrypted_password = cipher.encrypt_password(user_data.password)
+
+            # Create new account with fixed passcode and 'pending_approval' status
+            cursor.execute(
+                """INSERT INTO users 
+                (phone, passcode, first_name, last_name, type, status, password) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (user_data.phone, user_data.passcode, user_data.first_name,
+                 user_data.last_name, 0, 'pending_approval', encrypted_password)
+            )
+            user_id = cursor.lastrowid
+            user_type = 0
+            user_status = 'pending_approval'
+            conn.commit()
+
+        # Common flow for both registration and login
         otp_session_manager.delete_user_sessions(user_id)
-
-        # Send OTP
-        session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
-
-        token = TokenHandler.create_session(user_id, 0, request)
-
-        return {
-            "access_token": token,
-            "message": "Account created successfully. Waiting for admin approval. OTP verification code sent.",
-            "user_type": 0,
-            "otp_required": True,
-            "status": "pending_approval"
-        }
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {str(e)}"
-        )
-    finally:
-        if conn:
-            conn.close()
-
-
-@router.post("/login", response_model=TokenResponse, summary="User login")
-async def login(user: UserLogin, request: Request):
-    """
-    Login to existing account:
-    - **phone**: Registered phone number
-    - **password**: User's password (required)
-    - **passcode**: Will be ignored (legacy field)
-    """
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Get user data including stored password
-        cursor.execute(
-            "SELECT id, password, status, type FROM users WHERE phone = ?",
-            (user.phone,)
-        )
-        user_data = cursor.fetchone()
-
-        if not user_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Phone number not registered"
-            )
-
-        user_id, stored_password, user_status, user_type = user_data
-        encrypted_password = cipher.decrypt_password(stored_password)
-        print(encrypted_password)
-        print(stored_password)
-        print(user.password)
-        # Verify password
-        if not user.password == encrypted_password:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials"
-            ) 
-
-        if user_status == 'pending_approval':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account is pending admin approval"
-            )
-
-        if user_status == 'rejected':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account has been rejected"
-            )
-
-        if user_status == 'banned':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account has been banned"
-            )
-
-        # Delete any old OTP sessions
-        otp_session_manager.delete_user_sessions(user_id)
-
-        # Send OTP
-        session_id = OTPHelper.send_and_store_otp(user_id, user.phone)
-
+        session_id = OTPHelper.send_and_store_otp(user_id, user_data.phone)
         token = TokenHandler.create_session(user_id, user_type, request)
 
         return {
             "access_token": token,
             "message": "OTP verification code sent",
             "user_type": user_type,
-            "otp_required": True
+            "otp_required": True,
+            "status": user_status,
+            "is_new_user": not bool(existing_user)
         }
 
     except HTTPException as he:
@@ -159,17 +116,18 @@ async def login(user: UserLogin, request: Request):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
+            detail=f"Authentication failed: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
 
-@router.post("/verify-otp", summary="تحقق من رمز OTP")
+
+@router.post("/verify-otp", summary="Verify OTP code")
 async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
     """
-    التحقق من رمز OTP المرسل إلى المستخدم:
-    - **otp**: رمز التحقق الذي استلمه المستخدم (مطلوب)
+    Verify the OTP code sent to the user:
+    - **otp**: The verification code received by the user (required)
     """
     try:
         user_id = user_data["user_id"]
@@ -177,12 +135,12 @@ async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
         if not OTPHelper.verify_otp_for_user(user_id, otp):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="رمز OTP غير صحيح أو منتهي الصلاحية"
+                detail="Invalid or expired OTP code"
             )
 
         return {
             "success": True,
-            "message": "تم التحقق من OTP بنجاح",
+            "message": "OTP verified successfully",
             "user_id": user_id
         }
 
@@ -191,42 +149,42 @@ async def verify_otp(otp: str, user_data: dict = Depends(auth_scheme)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل التحقق من OTP: {str(e)}"
+            detail=f"OTP verification failed: {str(e)}"
         )
 
 
-@router.post("/logout", summary="تسجيل الخروج")
+@router.post("/logout", summary="User logout")
 async def logout(user_data: dict = Depends(auth_scheme)):
     """
-    تسجيل خروج المستخدم وإنهاء الجلسة الحالية
+    Logout the user and terminate the current session
     """
     try:
         token = user_data["token"]
         user_id = user_data["user_id"]
 
-        # حذف جلسة OTP الخاصة بالمستخدم
+        # Delete the user's OTP session
         otp_session_manager.delete_user_sessions(user_id)
 
-        # حذف جلسة التوكن
+        # Delete the token session
         TokenHandler.delete_session(token)
 
         return {
             "success": True,
-            "message": "تم تسجيل الخروج بنجاح",
+            "message": "Logout successful",
             "user_id": user_id
         }
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"فشل تسجيل الخروج: {str(e)}"
+            detail=f"Logout failed: {str(e)}"
         )
 
 
-@router.get("/check-auth", summary="فحص حالة المصادقة")
+@router.get("/check-auth", summary="Check authentication status")
 async def check_auth(user_data: dict = Depends(auth_scheme)):
     """
-    فحص ما إذا كان المستخدم مصادقًا عليه أم لا
+    Check if the user is authenticated or not
     """
     return {
         "authenticated": True,
@@ -235,9 +193,9 @@ async def check_auth(user_data: dict = Depends(auth_scheme)):
     }
 
 
-@router.get("/devices", summary="الحصول على أجهزة المستخدم")
+@router.get("/devices", summary="Get user devices")
 async def get_user_devices(user_data: dict = Depends(auth_scheme)):
-    """الحصول على سجل أجهزة المستخدم"""
+    """Retrieve the user's device history"""
     conn = None
     try:
         conn = get_db_connection()
@@ -272,86 +230,8 @@ async def get_user_devices(user_data: dict = Depends(auth_scheme)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب بيانات الأجهزة: {str(e)}"
+            detail=f"Failed to retrieve device data: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
-
-
-# @router.get("/user/notifications", response_model=List[dict])
-# async def get_user_notifications(
-#     user_data: dict = Depends(auth_scheme)
-# ):
-#     """الحصول على جميع إشعارات المستخدم (الخاصة به)"""
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-
-#         cursor.execute(
-#             """SELECT n.id, n.message, n.is_read, n.created_at, 
-#                u.first_name || ' ' || u.last_name as sender_name
-#             FROM notifications n
-#             JOIN users u ON n.sender_id = u.id
-#             WHERE n.user_id = ? AND n.is_admin = 0
-#             ORDER BY n.created_at DESC""",
-#             (user_data["user_id"],)
-#         )
-
-#         notifications = []
-#         for row in cursor.fetchall():
-#             notifications.append({
-#                 "id": row[0],
-#                 "message": row[1],
-#                 "is_read": bool(row[2]),
-#                 "created_at": row[3],
-#                 "sender": row[4]
-#             })
-
-#         return notifications
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to fetch notifications: {str(e)}"
-#         )
-#     finally:
-#         if conn:
-#             conn.close()
-
-
-# @router.put("/user/notifications/{notification_id}/read")
-# async def mark_notification_as_read(
-#     notification_id: int,
-#     user_data: dict = Depends(auth_scheme)
-# ):
-#     """تحديث حالة الإشعار كمقروء"""
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-
-#         cursor.execute(
-#             """UPDATE notifications 
-#             SET is_read = 1 
-#             WHERE id = ? AND user_id = ?""",
-#             (notification_id, user_data["user_id"])
-#         )
-#         conn.commit()
-
-#         if cursor.rowcount == 0:
-#             raise HTTPException(
-#                 status_code=404, detail="Notification not found or not owned by you")
-
-#         return {
-#             "success": True,
-#             "message": "Notification marked as read"
-#         }
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to update notification: {str(e)}"
-#         )
-#     finally:
-#         if conn:
-#             conn.close()

@@ -37,23 +37,17 @@ def get_mt5_client():
         )
 
 
-@router.post("/accounts", response_model=dict, summary="Create New Account")
-async def create_mt5_account(
+@router.post("/accounts", response_model=dict, summary="Create New Account Request")
+async def create_mt5_account_request(
     account_data: dict,
     request: Request,
     user_data: dict = Depends(auth_scheme),
     _: bool = Depends(check_permission),
-    has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))
 ):
     """
-    إنشاء حساب جديد في MT5 مع **تشفير كلمات المرور**.
-    يتم التحقق من صلاحية الوصول أولاً قبل تنفيذ العملية.
-    يمكن للمستخدم إنشاء أكثر من حساب.
+    إنشاء طلب جديد لحساب MT5 (يحتاج موافقة الإدارة)
     """
-    client = get_mt5_client()
     conn = None
-
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -71,9 +65,9 @@ async def create_mt5_account(
                 detail="نوع الحساب غير صالح. الرجاء اختيار نوع حساب موجود."
             )
 
-        # جلب بيانات المستخدم
+        # جلب بيانات المستخدم للتحقق فقط
         cursor.execute(
-            "SELECT first_name, last_name FROM users WHERE id = ?",
+            "SELECT id FROM users WHERE id = ?",
             (user_data["user_id"],)
         )
         user = cursor.fetchone()
@@ -81,44 +75,172 @@ async def create_mt5_account(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        first_name, last_name = user
-
-        # إنشاء الحساب في MT5 (معلق حالياً)
-        result = client.create_account(
-            first_name=first_name,
-            last_name=last_name,
-            account_type=account_data["account_type"]
-        )
-        encrypted_password = cipher.encrypt_password(result["password"])
-        encrypted_investor_password = cipher.encrypt_password(
-            result["investor_password"])
-
-        # تخزين بيانات الحساب في قاعدة البيانات
+        # تخزين طلب الحساب في قاعدة البيانات (بدون بيانات MT5 بعد)
         cursor.execute(
             """INSERT INTO user_mt5_accounts 
-            (user_id, mt5_login_id, mt5_password, mt5_investor_password, account_type) 
-            VALUES (?, ?, ?, ?, ?)""",
+            (user_id, account_type, status) 
+            VALUES (?, ?, ?)""",
             (
                 user_data["user_id"],
-                result["login"],
-                encrypted_password,
-                encrypted_investor_password,
-                account_data["account_type"]
+                account_data["account_type"],
+                "pending"  # الحالة الافتراضية
             )
         )
         conn.commit()
 
         return {
             "success": True,
-            "message": "تم إنشاء حساب MT5 بنجاح",
+            "message": "تم إنشاء طلب حساب MT5 بنجاح وهو بانتظار الموافقة من الإدارة",
+            "status": "pending"
         }
 
     except sqlite3.IntegrityError as e:
-        # تم تعديل هذه الرسالة لأننا نسمح بأكثر من حساب
         raise HTTPException(
             status_code=400,
-            detail=f"حدث خطأ في إنشاء الحساب: {str(e)}"
+            detail=f"حدث خطأ في إنشاء طلب الحساب: {str(e)}"
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"حدث خطأ غير متوقع: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/accounts/approve/{account_id}", response_model=dict, summary="Approve MT5 Account")
+async def approve_mt5_account(
+    account_id: int,
+    request: Request,
+    user_data: dict = Depends(auth_scheme),
+    _: bool = Depends(check_permission),
+):
+    """
+    الموافقة على حساب MT5 وإنشاؤه فعلياً في نظام MT5
+    """
+    client = get_mt5_client()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # جلب بيانات الطلب
+        cursor.execute(
+            """SELECT u.id, u.first_name, u.last_name, a.account_type 
+            FROM user_mt5_accounts a
+            JOIN users u ON a.user_id = u.id
+            WHERE a.id = ? AND a.status = 'pending'""",
+            (account_id,)
+        )
+        account_request = cursor.fetchone()
+
+        if not account_request:
+            raise HTTPException(
+                status_code=404,
+                detail="طلب الحساب غير موجود أو ليس في حالة انتظار الموافقة"
+            )
+
+        user_id, first_name, last_name, account_type = account_request
+
+        # إنشاء الحساب في MT5
+        result = client.create_account(
+            first_name=first_name,
+            last_name=last_name,
+            account_type=account_type
+        )
+        encrypted_password = cipher.encrypt_password(result["password"])
+        encrypted_investor_password = cipher.encrypt_password(
+            result["investor_password"])
+
+        # تحديث سجل الحساب ببيانات MT5 الفعلية
+        cursor.execute(
+            """UPDATE user_mt5_accounts 
+            SET mt5_login_id = ?, 
+                mt5_password = ?, 
+                mt5_investor_password = ?,
+                status = 'approved'
+            WHERE id = ?""",
+            (
+                result["login"],
+                encrypted_password,
+                encrypted_investor_password,
+                account_id
+            )
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": "تمت الموافقة على الحساب وإنشاؤه في نظام MT5 بنجاح",
+            "account_id": account_id,
+            "mt5_login_id": result["login"],
+            "new_status": "approved"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # في حالة فشل إنشاء الحساب في MT5، نرجع الحالة إلى pending
+        if conn:
+            cursor.execute(
+                "UPDATE user_mt5_accounts SET status = 'pending' WHERE id = ?",
+                (account_id,)
+            )
+            conn.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"حدث خطأ أثناء إنشاء الحساب في MT5: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/accounts/reject/{account_id}", response_model=dict, summary="Reject MT5 Account")
+async def reject_mt5_account(
+    account_id: int,
+    request: Request,
+    user_data: dict = Depends(auth_scheme),
+    _: bool = Depends(check_permission),
+):
+    """
+    رفض طلب إنشاء حساب MT5
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # التحقق من وجود الطلب
+        cursor.execute(
+            "SELECT id FROM user_mt5_accounts WHERE id = ? AND status = 'pending'",
+            (account_id,)
+        )
+        account = cursor.fetchone()
+
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail="طلب الحساب غير موجود أو ليس في حالة انتظار الموافقة"
+            )
+
+        # تحديث حالة الحساب إلى مرفوض
+        cursor.execute(
+            "UPDATE user_mt5_accounts SET status = 'rejected' WHERE id = ?",
+            (account_id,)
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": "تم رفض طلب الحساب بنجاح",
+            "account_id": account_id,
+            "new_status": "rejected"
+        }
+
     except HTTPException:
         raise
     except Exception as e:

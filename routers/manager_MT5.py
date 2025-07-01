@@ -691,22 +691,19 @@ async def admin_disable_mt5_trading(
             conn.close()
 
 
-
-
-
 def get_assigned_users_for_manager(auth_data: dict = Depends(admin_scheme)) -> Dict:
     """
     Retrieve all users assigned to the current manager
-    
+
     Args:
         auth_data: Authentication data of the manager (from admin_scheme)
-        
+
     Returns:
         Dictionary containing:
         - manager_id: ID of the manager
         - assigned_users: List of assigned users with their basic info
         - total_users: Total count of assigned users
-        
+
     Raises:
         HTTPException: If database error occurs or user is not a manager
     """
@@ -715,22 +712,22 @@ def get_assigned_users_for_manager(auth_data: dict = Depends(admin_scheme)) -> D
         # 1. Get database connection
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # 2. Get manager ID from user_id
         cursor.execute(
             "SELECT id FROM managers WHERE user_id = ?",
             (auth_data["user_id"],)
         )
         manager = cursor.fetchone()
-        
+
         if not manager:
             raise HTTPException(
                 status_code=403,
                 detail="You are not an authorized manager"
             )
-            
+
         manager_id = manager[0]
-        
+
         # 3. Get all users assigned to this manager
         cursor.execute("""
             SELECT u.id, u.phone, u.first_name, u.last_name, 
@@ -740,9 +737,9 @@ def get_assigned_users_for_manager(auth_data: dict = Depends(admin_scheme)) -> D
             WHERE ma.manager_id = ?
             ORDER BY u.created_at DESC
         """, (manager_id,))
-        
+
         assigned_users = cursor.fetchall()
-        
+
         # 4. Convert results to dictionaries
         users_list = []
         for user in assigned_users:
@@ -754,13 +751,13 @@ def get_assigned_users_for_manager(auth_data: dict = Depends(admin_scheme)) -> D
                 "created_at": user[4],
                 "status": user[5]
             })
-            
+
         return {
             "manager_id": manager_id,
             "assigned_users": users_list,
             "total_users": len(users_list)
         }
-        
+
     except sqlite3.Error as e:
         raise HTTPException(
             status_code=500,
@@ -770,23 +767,24 @@ def get_assigned_users_for_manager(auth_data: dict = Depends(admin_scheme)) -> D
         if conn:
             conn.close()
 
+
 @router.get("/assigned-users",
-           response_model=Dict,
-           summary="Get all users assigned to current manager",
-           description="Retrieve a list of all users assigned to the currently authenticated manager")
+            response_model=Dict,
+            summary="Get all users assigned to current manager",
+            description="Retrieve a list of all users assigned to the currently authenticated manager")
 async def get_manager_assigned_users(
     users_data: Dict = Depends(get_assigned_users_for_manager)
 ):
     """
     Get all users assigned to the current manager
-    
+
     Returns:
         {
             "manager_id": int,
             "assigned_users": List[Dict],
             "total_users": int
         }
-        
+
         Each user dictionary contains:
         - id: User ID
         - phone: Phone number

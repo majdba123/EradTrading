@@ -22,7 +22,7 @@ async def create_account_type(
     account_type: AccountTypeCreate,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """إنشاء نوع حساب جديد (للأدمن فقط)"""
+    """Create a new account type (Admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can create account types")
@@ -32,6 +32,7 @@ async def create_account_type(
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Insert new account type into database
         cursor.execute(
             """INSERT INTO account_types 
             (name)
@@ -64,7 +65,7 @@ async def create_account_type(
 async def get_all_account_types(
     admin_data: dict = Depends(auth_scheme)
 ):
-    """الحصول على جميع أنواع الحسابات (للأدمن فقط)"""
+    """Get all account types (Admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can view account types")
@@ -74,6 +75,7 @@ async def get_all_account_types(
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Fetch all account types ordered by name
         cursor.execute(
             """SELECT id, name
             FROM account_types
@@ -103,7 +105,7 @@ async def update_account_type(
     account_type: AccountTypeUpdate,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """تحديث نوع حساب (للأدمن فقط)"""
+    """Update an account type (Admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can update account types")
@@ -113,7 +115,7 @@ async def update_account_type(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # بناء استعلام التحديث الديناميكي
+        # Prepare dynamic update fields
         update_fields = []
         params = []
 
@@ -129,6 +131,7 @@ async def update_account_type(
 
         params.append(type_id)
 
+        # Build dynamic update query
         query = f"""
         UPDATE account_types 
         SET {', '.join(update_fields)}, updated_at = CURRENT_TIMESTAMP
@@ -166,7 +169,7 @@ async def delete_account_type(
     type_id: int,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """حذف نوع حساب (للأدمن فقط)"""
+    """Delete an account type (Admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can delete account types")
@@ -176,7 +179,7 @@ async def delete_account_type(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من عدم وجود حسابات مرتبطة بهذا النوع
+        # Check if any accounts are using this type
         cursor.execute(
             "SELECT 1 FROM user_mt5_accounts WHERE account_type = ? LIMIT 1",
             (type_id,)
@@ -187,6 +190,7 @@ async def delete_account_type(
                 detail="Cannot delete account type with associated accounts"
             )
 
+        # Delete the account type
         cursor.execute(
             "DELETE FROM account_types WHERE id = ?",
             (type_id,)

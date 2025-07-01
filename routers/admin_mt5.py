@@ -18,7 +18,7 @@ router = APIRouter(
     tags=["Admin MT5 Management"]
 )
 
-# إعادة استخدام إعدادات MT5 من الملف الأصلي
+# Reuse MT5 settings from original file
 SCB_BASE_URL = "https://scb.erad-markets.com"
 SCB_ADMIN_USER = "admin"
 SCB_ADMIN_PASS = "nani*&H#*$HDJbhdb3746bybHBSHDJG&3gnfjenjkbyfv76G673G4UBBEKBF8"
@@ -44,14 +44,14 @@ async def admin_create_mt5_account(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    إنشاء حساب MT5 للمستخدم (للمدير فقط)
+    Create MT5 account for user (Admin only)
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود المستخدم
+        # Verify user exists
         cursor.execute(
             "SELECT first_name, last_name FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
@@ -61,7 +61,7 @@ async def admin_create_mt5_account(
 
         first_name, last_name = user
 
-        # إنشاء الحساب في MT5
+        # Create account in MT5
         client = get_mt5_client()
         result = client.create_account(
             first_name=first_name,
@@ -69,12 +69,12 @@ async def admin_create_mt5_account(
             account_type=account_data["account_type"]
         )
 
-        # تشفير كلمات المرور
+        # Encrypt passwords
         encrypted_password = cipher.encrypt_password(result["password"])
         encrypted_investor_password = cipher.encrypt_password(
             result["investor_password"])
 
-        # تخزين بيانات الحساب
+        # Store account data
         cursor.execute(
             """INSERT INTO user_mt5_accounts 
             (user_id, mt5_login_id, mt5_password, mt5_investor_password, account_type) 
@@ -122,7 +122,7 @@ async def admin_get_user_accounts(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    الحصول على جميع حسابات MT5 الخاصة بالمستخدم (للمدير فقط)
+    Get all MT5 accounts for a user (Admin only)
     """
     conn = None
     try:
@@ -178,9 +178,9 @@ async def admin_deposit_to_mt5(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    إيداع أموال في حساب MT5 للمستخدم (للمدير فقط)
+    Deposit funds to user's MT5 account (Admin only)
     """
-    # التحقق من أن الحساب يخص المستخدم
+    # Verify account belongs to user
     conn = None
     try:
         conn = get_db_connection()
@@ -195,7 +195,7 @@ async def admin_deposit_to_mt5(
                 detail="This account does not belong to the specified user"
             )
 
-        # تنفيذ الإيداع
+        # Execute deposit
         client = get_mt5_client()
         result = client.deposit(
             login=login,
@@ -234,9 +234,9 @@ async def admin_withdraw_from_mt5(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    سحب أموال من حساب MT5 للمستخدم (للمدير فقط)
+    Withdraw funds from user's MT5 account (Admin only)
     """
-    # التحقق من أن الحساب يخص المستخدم
+    # Verify account belongs to user
     conn = None
     try:
         conn = get_db_connection()
@@ -251,7 +251,7 @@ async def admin_withdraw_from_mt5(
                 detail="This account does not belong to the specified user"
             )
 
-        # تنفيذ السحب
+        # Execute withdrawal
         client = get_mt5_client()
         result = client.withdraw(
             login=login,
@@ -289,15 +289,15 @@ async def admin_transfer_between_mt5(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    تحويل أموال بين حسابات MT5 للمستخدم (للمدير فقط)
+    Transfer funds between user's MT5 accounts (Admin only)
     """
-    # التحقق من أن الحسابات تخص المستخدم
+    # Verify accounts belong to user
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من الحساب المرسل
+        # Verify source account
         cursor.execute(
             "SELECT 1 FROM user_mt5_accounts WHERE user_id = ? AND mt5_login_id = ?",
             (user_id, transfer.from_login)
@@ -308,7 +308,7 @@ async def admin_transfer_between_mt5(
                 detail="Source account does not belong to the specified user"
             )
 
-        # التحقق من الحساب المستقبل
+        # Verify destination account
         cursor.execute(
             "SELECT 1 FROM user_mt5_accounts WHERE user_id = ? AND mt5_login_id = ?",
             (user_id, transfer.to_login)
@@ -319,7 +319,7 @@ async def admin_transfer_between_mt5(
                 detail="Destination account does not belong to the specified user"
             )
 
-        # تنفيذ التحويل
+        # Execute transfer
         client = get_mt5_client()
         result = client.transfer(
             from_login=transfer.from_login,
@@ -357,11 +357,11 @@ async def admin_change_mt5_password(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    تغيير كلمة مرور حساب MT5 للمستخدم (للمدير فقط)
+    Change MT5 account password (Admin only)
     """
     conn = None
     try:
-        # التحقق من أن الحساب يخص المستخدم
+        # Verify account belongs to user
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -374,7 +374,7 @@ async def admin_change_mt5_password(
                 detail="This account does not belong to the specified user"
             )
 
-        # تغيير كلمة المرور في MT5
+        # Change password in MT5
         client = get_mt5_client()
         new_password = client.generate_password(8)
 
@@ -390,7 +390,7 @@ async def admin_change_mt5_password(
                 detail="MT5 password change failed"
             )
 
-        # تحديث كلمة المرور في قاعدة البيانات
+        # Update password in database
         encrypted_password = cipher.encrypt_password(new_password)
 
         if password_data.password_type == "MAIN":
@@ -412,7 +412,7 @@ async def admin_change_mt5_password(
             "user_id": user_id,
             "login": login,
             "password_type": password_data.password_type,
-            "new_password": new_password  # إرجاع كلمة المرور الجديدة للمدير
+            "new_password": new_password  # Return new password to admin
         }
 
     except SCBAPIError as e:
@@ -437,11 +437,11 @@ async def admin_enable_mt5_trading(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    تمكين التداول لحساب MT5 للمستخدم (للمدير فقط)
+    Enable trading for user's MT5 account (Admin only)
     """
     conn = None
     try:
-        # التحقق من أن الحساب يخص المستخدم
+        # Verify account belongs to user
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -454,7 +454,7 @@ async def admin_enable_mt5_trading(
                 detail="This account does not belong to the specified user"
             )
 
-        # تمكين التداول
+        # Enable trading
         client = get_mt5_client()
         result = client.enable_trading(login)
 
@@ -491,27 +491,27 @@ async def admin_update_mt5_user_rights(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    تحديث صلاحيات وإعدادات حساب MT5 (للمدير فقط)
+    Update MT5 account permissions and settings (Admin only)
 
-    المطلوب:
+    Required:
     - Path Parameters:
-        - user_id: معرف المستخدم المالك للحساب
-        - login_id: رقم حساب MT5
+        - user_id: ID of account owner
+        - login_id: MT5 account number
     - Request Body:
     {
         "rights": {
-            "USER_RIGHT_ENABLED": 1,       // 1 لتمكين، 0 لتعطيل
-            "USER_RIGHT_TRADE_DISABLED": 0  // 1 لتعطيل التداول، 0 لتمكين
+            "USER_RIGHT_ENABLED": 1,       // 1 to enable, 0 to disable
+            "USER_RIGHT_TRADE_DISABLED": 0  // 1 to disable trading, 0 to enable
         },
-        "params": {                        // اختياري
-            "leverage": 100,               // الرافعة المالية
-            "email": "user@example.com"    // البريد الإلكتروني
+        "params": {                        // optional
+            "leverage": 100,               // leverage
+            "email": "user@example.com"     // email
         }
     }
     """
     conn = None
     try:
-        # 1. التحقق من أن الحساب يخص المستخدم المحدد
+        # 1. Verify account belongs to specified user
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -523,20 +523,20 @@ async def admin_update_mt5_user_rights(
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="الحساب لا ينتمي للمستخدم المحدد"
+                detail="Account does not belong to specified user"
             )
 
-        # 2. التحقق من وجود البيانات المطلوبة
+        # 2. Verify required data exists
         if not rights_data.get("rights"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="يجب تقديم بيانات الصلاحيات المطلوبة"
+                detail="Required permissions data must be provided"
             )
 
         rights = rights_data["rights"]
         params = rights_data.get("params", {})
 
-        # 3. تحديث الصلاحيات في MT5
+        # 3. Update permissions in MT5
         client = get_mt5_client()
         result = client.update_user_rights(
             login=login_id,
@@ -544,10 +544,10 @@ async def admin_update_mt5_user_rights(
             params=params
         )
 
-        # 4. إرجاع النتيجة
+        # 4. Return result
         return {
             "success": True,
-            "message": "تم تحديث صلاحيات الحساب بنجاح",
+            "message": "Account permissions updated successfully",
             "user_id": user_id,
             "login_id": login_id,
             "updated_rights": rights,
@@ -560,12 +560,12 @@ async def admin_update_mt5_user_rights(
     except SCBAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"خطأ في تحديث الصلاحيات: {e.message}"
+            detail=f"Error updating permissions: {e.message}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
@@ -579,11 +579,11 @@ async def admin_disable_mt5_trading(
     admin_data: dict = Depends(admin_scheme)
 ):
     """
-    تعطيل التداول لحساب MT5 للمستخدم (للمدير فقط)
+    Disable trading for user's MT5 account (Admin only)
     """
     conn = None
     try:
-        # التحقق من أن الحساب يخص المستخدم
+        # Verify account belongs to user
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -596,7 +596,7 @@ async def admin_disable_mt5_trading(
                 detail="This account does not belong to the specified user"
             )
 
-        # تعطيل التداول
+        # Disable trading
         client = get_mt5_client()
         result = client.disable_trading(login)
 

@@ -6,14 +6,14 @@ from admin_auth import admin_scheme
 from typing import Optional
 from pydantic import BaseModel
 from auth import TokenHandler
-from typing import  List
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from websocket_manager import websocket_manager  # استيراد مدير WebSocket
+from websocket_manager import websocket_manager
 from auth import auth_scheme
 import datetime
-
-import json  # استيراد json هنا أيضاً
+import json
 import asyncio
+
 router = APIRouter(
     prefix="/admin",
     tags=["Admin"]
@@ -30,16 +30,16 @@ def add_manager(
     manager_data: ManagerCreate,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """إضافة مدير جديد مع إنشاء حساب مستخدم له"""
+    """Add a new manager with user account creation"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # بدء المعاملة
+        # Begin transaction
         cursor.execute("BEGIN TRANSACTION")
 
-        # 1. إنشاء حساب المستخدم (مدير)
+        # 1. Create user account (manager)
         cursor.execute(
             """INSERT INTO users (phone, passcode, type, status)
                VALUES (?, ?, 2, 'active')""",
@@ -47,19 +47,19 @@ def add_manager(
         )
         user_id = cursor.lastrowid
 
-        # 2. إنشاء سجل المدير
+        # 2. Create manager record
         cursor.execute(
             """INSERT INTO managers (user_id, name)
                VALUES (?, ?)""",
             (user_id, manager_data.name)
         )
 
-        # تأكيد المعاملة
+        # Commit transaction
         conn.commit()
 
         return {
             "success": True,
-            "message": "تمت إضافة المدير بنجاح",
+            "message": "Manager added successfully",
             "user_id": user_id,
             "phone": manager_data.phone,
             "name": manager_data.name
@@ -70,18 +70,18 @@ def add_manager(
         if "UNIQUE constraint failed: users.phone" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="رقم الهاتف مسجل مسبقاً"
+                detail="Phone number already registered"
             )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"خطأ في قاعدة البيانات: {str(e)}"
+            detail=f"Database error: {str(e)}"
         )
     except Exception as e:
         if conn:
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في إضافة المدير: {str(e)}"
+            detail=f"Failed to add manager: {str(e)}"
         )
     finally:
         if conn:
@@ -91,20 +91,19 @@ def add_manager(
 @router.get("/managers")
 def get_all_managers(
     admin_data: dict = Depends(admin_scheme),
-    page: int = Query(1, gt=0, description="رقم الصفحة"),
-    per_page: int = Query(
-        10, gt=0, le=100, description="عدد العناصر في الصفحة"),
-    name: Optional[str] = Query(None, description="تصفية حسب الاسم"),
-    phone: Optional[str] = Query(None, description="تصفية حسب رقم الهاتف"),
-    status: Optional[str] = Query(None, description="تصفية حسب الحالة")
+    page: int = Query(1, gt=0, description="Page number"),
+    per_page: int = Query(10, gt=0, le=100, description="Items per page"),
+    name: Optional[str] = Query(None, description="Filter by name"),
+    phone: Optional[str] = Query(None, description="Filter by phone"),
+    status: Optional[str] = Query(None, description="Filter by status")
 ):
-    """الحصول على قائمة جميع المديرين مع الترقيم الصفحي والتصفية والترتيب"""
+    """Get list of all managers with pagination, filtering and sorting"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # بناء استعلام SQL مع التصفية
+        # Build SQL query with filters
         base_query = """
             SELECT 
                 u.id as user_id,
@@ -120,7 +119,7 @@ def get_all_managers(
         filters = []
         params = []
 
-        # إضافة عوامل التصفية إذا وجدت
+        # Add filters if provided
         if name:
             filters.append("m.name LIKE ?")
             params.append(f"%{name}%")
@@ -134,23 +133,23 @@ def get_all_managers(
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
-        # إضافة الترتيب من الأحدث
+        # Add sorting by newest
         base_query += " ORDER BY m.created_at DESC"
 
-        # حساب الإزاحة للترقيم الصفحي
+        # Calculate pagination offset
         offset = (page - 1) * per_page
 
-        # استعلام العد الكلي
+        # Total count query
         count_query = "SELECT COUNT(*) FROM (" + base_query + ")"
         cursor.execute(count_query, params)
         total_count = cursor.fetchone()[0]
 
-        # استعلام البيانات مع الترقيم الصفحي
+        # Data query with pagination
         paginated_query = base_query + " LIMIT ? OFFSET ?"
         params.extend([per_page, offset])
         cursor.execute(paginated_query, params)
 
-        # تحويل النتائج
+        # Transform results
         managers = []
         for row in cursor.fetchall():
             managers.append({
@@ -172,7 +171,7 @@ def get_all_managers(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب بيانات المديرين: {str(e)}"
+            detail=f"Failed to fetch managers: {str(e)}"
         )
     finally:
         if conn:
@@ -184,13 +183,13 @@ def filter_managers(
     filter_data: ManagerFilter,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """الحصول على قائمة المديرين مع التصفية باستخدام JSON في Body"""
+    """Get list of managers with filtering using JSON in Body"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # بناء استعلام SQL مع التصفية
+        # Build SQL query with filters
         base_query = """
             SELECT 
                 u.id as user_id,
@@ -206,7 +205,7 @@ def filter_managers(
         filters = []
         params = []
 
-        # إضافة عوامل التصفية إذا وجدت
+        # Add filters if provided
         if filter_data.name:
             filters.append("m.name LIKE ?")
             params.append(f"%{filter_data.name}%")
@@ -220,23 +219,23 @@ def filter_managers(
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
-        # إضافة الترتيب من الأحدث
+        # Add sorting by newest
         base_query += " ORDER BY m.created_at DESC"
 
-        # حساب الإزاحة للترقيم الصفحي
+        # Calculate pagination offset
         offset = (filter_data.page - 1) * filter_data.per_page
 
-        # استعلام العد الكلي
+        # Total count query
         count_query = "SELECT COUNT(*) FROM (" + base_query + ")"
         cursor.execute(count_query, params)
         total_count = cursor.fetchone()[0]
 
-        # استعلام البيانات مع الترقيم الصفحي
+        # Data query with pagination
         paginated_query = base_query + " LIMIT ? OFFSET ?"
         params.extend([filter_data.per_page, offset])
         cursor.execute(paginated_query, params)
 
-        # تحويل النتائج
+        # Transform results
         managers = []
         for row in cursor.fetchall():
             managers.append({
@@ -258,7 +257,7 @@ def filter_managers(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب بيانات المديرين: {str(e)}"
+            detail=f"Failed to fetch managers: {str(e)}"
         )
     finally:
         if conn:
@@ -273,13 +272,13 @@ class AssignUserRequest(BaseModel):
 def get_managers_with_users(
     admin_data: dict = Depends(admin_scheme)
 ):
-    """الحصول على جميع المديرين مع المستخدمين المرتبطين بهم"""
+    """Get all managers with their assigned users"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # جلب جميع المديرين
+        # Get all managers
         cursor.execute("""
             SELECT m.id, m.name, u.phone, u.status
             FROM managers m
@@ -290,7 +289,7 @@ def get_managers_with_users(
 
         result = []
         for manager in managers:
-            # جلب المستخدمين المرتبطين بكل مدير
+            # Get users assigned to each manager
             cursor.execute("""
                 SELECT u.id, u.phone, u.status
                 FROM manager_assignments ma
@@ -319,7 +318,7 @@ def get_managers_with_users(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب البيانات: {str(e)}"
+            detail=f"Failed to fetch data: {str(e)}"
         )
     finally:
         if conn:
@@ -332,38 +331,38 @@ def assign_user_to_manager(
     request: AssignUserRequest,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """ربط مستخدم بمدير مع التحقق من عدم وجود مدير آخر"""
+    """Assign user to manager with check for existing assignments"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود المدير
+        # Verify manager exists
         cursor.execute("SELECT id FROM managers WHERE id = ?", (manager_id,))
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المدير غير موجود"
+                detail="Manager not found"
             )
 
-        # التحقق من وجود المستخدم
+        # Verify user exists
         cursor.execute("SELECT id, type FROM users WHERE id = ?",
                        (request.user_id,))
         user = cursor.fetchone()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المستخدم غير موجود"
+                detail="User not found"
             )
 
-        # التحقق من أن المستخدم ليس مديراً
+        # Verify user is not a manager
         if user[1] == 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="لا يمكن ربط مدير بمدير آخر"
+                detail="Cannot assign a manager to another manager"
             )
 
-        # التحقق من أن المستخدم ليس مرتبطاً بمدير آخر
+        # Check if user is already assigned to another manager
         cursor.execute("""
             SELECT manager_id FROM manager_assignments 
             WHERE user_id = ?
@@ -373,10 +372,10 @@ def assign_user_to_manager(
         if existing_assignment:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"المستخدم مرتبط بالفعل بمدير آخر (ID: {existing_assignment[0]})"
+                detail=f"User is already assigned to another manager (ID: {existing_assignment[0]})"
             )
 
-        # ربط المستخدم بالمدير
+        # Assign user to manager
         cursor.execute("""
             INSERT INTO manager_assignments (manager_id, user_id)
             VALUES (?, ?)
@@ -385,7 +384,7 @@ def assign_user_to_manager(
         conn.commit()
         return {
             "success": True,
-            "message": "تم ربط المستخدم بالمدير بنجاح",
+            "message": "User assigned to manager successfully",
             "manager_id": manager_id,
             "user_id": request.user_id
         }
@@ -394,7 +393,7 @@ def assign_user_to_manager(
         conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"خطأ في قاعدة البيانات: {str(e)}"
+            detail=f"Database error: {str(e)}"
         )
     except HTTPException:
         raise
@@ -403,7 +402,7 @@ def assign_user_to_manager(
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في ربط المستخدم: {str(e)}"
+            detail=f"Failed to assign user: {str(e)}"
         )
     finally:
         if conn:
@@ -415,16 +414,16 @@ def delete_manager(
     manager_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """حذف مدير مع التحقق من عدم وجود مستخدمين مرتبطين"""
+    """Delete manager with check for assigned users"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # بدء المعاملة
+        # Begin transaction
         cursor.execute("BEGIN TRANSACTION")
 
-        # 1. التحقق من وجود المدير وعدد المستخدمين المرتبطين
+        # 1. Verify manager exists and count assigned users
         cursor.execute("""
             SELECT m.id, m.user_id, COUNT(ma.id) as assigned_users_count
             FROM managers m
@@ -438,26 +437,26 @@ def delete_manager(
         if not manager_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المدير غير موجود"
+                detail="Manager not found"
             )
 
         user_id = manager_info[1]
         assigned_users_count = manager_info[2]
 
-        # 2. رفض الحذف إذا كان لديه مستخدمين مرتبطين
+        # 2. Prevent deletion if manager has assigned users
         if assigned_users_count > 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"لا يمكن حذف المدير لديه {assigned_users_count} مستخدم مرتبط. يرجى إلغاء ربطهم أولاً"
+                detail=f"Cannot delete manager with {assigned_users_count} assigned users. Please unassign them first"
             )
 
-        # 3. حذف سجل المدير
+        # 3. Delete manager record
         cursor.execute("""
             DELETE FROM managers 
             WHERE id = ?
         """, (manager_id,))
 
-        # 4. تحديث نوع المستخدم إلى غير مدير
+        # 4. Update user type to non-manager
         cursor.execute("""
             UPDATE users 
             SET type = 0 
@@ -468,7 +467,7 @@ def delete_manager(
 
         return {
             "success": True,
-            "message": "تم حذف المدير بنجاح",
+            "message": "Manager deleted successfully",
             "deleted_manager_id": manager_id,
             "user_downgraded": user_id
         }
@@ -482,7 +481,7 @@ def delete_manager(
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في حذف المدير: {str(e)}"
+            detail=f"Failed to delete manager: {str(e)}"
         )
     finally:
         if conn:
@@ -499,13 +498,13 @@ def unassign_user(
     request: UnassignUserRequest,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """فك ربط مستخدم من مدير"""
+    """Unassign user from manager"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود العلاقة
+        # Verify assignment exists
         cursor.execute("""
             SELECT 1 FROM manager_assignments
             WHERE manager_id = ? AND user_id = ?
@@ -514,10 +513,10 @@ def unassign_user(
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="لا يوجد ارتباط بين المدير والمستخدم"
+                detail="No assignment exists between manager and user"
             )
 
-        # فك الربط
+        # Remove assignment
         cursor.execute("""
             DELETE FROM manager_assignments
             WHERE manager_id = ? AND user_id = ?
@@ -527,7 +526,7 @@ def unassign_user(
 
         return {
             "success": True,
-            "message": "تم فك ربط المستخدم من المدير بنجاح",
+            "message": "User unassigned from manager successfully",
             "manager_id": request.manager_id,
             "user_id": request.user_id
         }
@@ -537,7 +536,7 @@ def unassign_user(
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في فك الربط: {str(e)}"
+            detail=f"Failed to unassign user: {str(e)}"
         )
     finally:
         if conn:
@@ -546,26 +545,25 @@ def unassign_user(
 
 @router.get("/manager-users/{manager_id}")
 def get_manager_users(
-
     manager_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """الحصول على جميع المستخدمين المرتبطين بمدير معين"""
+    """Get all users assigned to a specific manager"""
     conn = None
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row  # هذا السطر مهم للتحويل إلى قاموس
+        conn.row_factory = sqlite3.Row  # Important for dictionary conversion
         cursor = conn.cursor()
 
-        # التحقق من وجود المدير أولاً
+        # Verify manager exists
         cursor.execute("SELECT id FROM managers WHERE id = ?", (manager_id,))
         if not cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المدير غير موجود"
+                detail="Manager not found"
             )
 
-        # جلب المستخدمين المرتبطين
+        # Get assigned users
         cursor.execute("""
             SELECT u.id, u.phone, u.status
             FROM manager_assignments ma
@@ -573,7 +571,7 @@ def get_manager_users(
             WHERE ma.manager_id = ?
         """, (manager_id,))
 
-        # تحويل النتائج إلى قواميس
+        # Convert results to dictionaries
         users = []
         for row in cursor.fetchall():
             users.append({
@@ -593,7 +591,7 @@ def get_manager_users(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب البيانات: {str(e)}"
+            detail=f"Failed to fetch data: {str(e)}"
         )
     finally:
         if conn:
@@ -608,20 +606,20 @@ def update_user_status(
     status_data: UserStatusUpdate,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """تحديث حالة المستخدم مع التحقق من الحظر التطبيقي"""
+    """Update user status with application ban check"""
     conn = None
     try:
-        # التحقق من أن الحالة الجديدة مسموح بها
+        # Verify new status is allowed
         if status_data.new_status not in ALLOWED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"الحالة غير صالحة. الحالات المسموحة: {', '.join(ALLOWED_STATUSES)}"
+                detail=f"Invalid status. Allowed statuses: {', '.join(ALLOWED_STATUSES)}"
             )
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 1. التحقق من وجود المستخدم وأنه ليس مديراً
+        # 1. Verify user exists and is not a manager
         cursor.execute(
             "SELECT id, type FROM users WHERE id = ?",
             (status_data.user_id,)
@@ -631,22 +629,22 @@ def update_user_status(
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المستخدم غير موجود"
+                detail="User not found"
             )
 
-        if user[1] == 1:  # إذا كان المستخدم مديراً
+        if user[1] == 1:  # If user is a manager
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="لا يمكن تغيير حالة المديرين"
+                detail="Cannot change status of managers"
             )
 
-        # 2. تحديث حالة المستخدم
+        # 2. Update user status
         cursor.execute(
             "UPDATE users SET status = ? WHERE id = ?",
             (status_data.new_status, status_data.user_id)
         )
 
-        # إذا تم حظر المستخدم، نقوم بإنهاء جميع جلساته
+        # If user is banned, terminate all sessions
         if status_data.new_status == 'banned':
             cursor.execute(
                 "DELETE FROM user_sessions WHERE user_id = ?",
@@ -657,7 +655,7 @@ def update_user_status(
 
         return {
             "success": True,
-            "message": f"تم تحديث حالة المستخدم إلى '{status_data.new_status}' بنجاح",
+            "message": f"User status updated to '{status_data.new_status}' successfully",
             "user_id": status_data.user_id,
             "new_status": status_data.new_status
         }
@@ -669,7 +667,7 @@ def update_user_status(
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في تحديث حالة المستخدم: {str(e)}"
+            detail=f"Failed to update user status: {str(e)}"
         )
     finally:
         if conn:
@@ -688,7 +686,7 @@ def get_pending_accounts(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Calculate offset for pagination
+        # Calculate pagination offset
         offset = (page - 1) * per_page
 
         # Total count query
@@ -790,6 +788,7 @@ def approve_user_account(
         if conn:
             conn.close()
 
+
 @router.post("/reject-account/{user_id}", summary="Reject user account")
 async def reject_user_account(
     user_id: int,
@@ -833,7 +832,7 @@ async def reject_user_account(
         )
 
         conn.commit()
-        
+
         # Prepare notification
         notification = {
             "type": "account_rejected",
@@ -841,7 +840,7 @@ async def reject_user_account(
             "timestamp": datetime.datetime.now().isoformat(),
             "user_id": user_id
         }
-        
+
         # Send real-time notification
         await websocket_manager.send_personal_notification(str(user_id), notification)
 
@@ -862,23 +861,24 @@ async def reject_user_account(
     finally:
         if conn:
             conn.close()
-@router.get("/sessions", summary="عرض جميع الجلسات النشطة")
+
+
+@router.get("/sessions", summary="View all active sessions")
 async def get_all_active_sessions(
     admin: dict = Depends(admin_scheme),
-    page: int = Query(1, gt=0, description="رقم الصفحة"),
-    per_page: int = Query(
-        10, gt=0, le=100, description="عدد العناصر في الصفحة")
+    page: int = Query(1, gt=0, description="Page number"),
+    per_page: int = Query(10, gt=0, le=100, description="Items per page")
 ):
-    """للمديرين فقط - عرض جميع الجلسات النشطة مع معلومات المستخدمين"""
+    """Admin only - View all active sessions with user information"""
     conn = None
     try:
-        # حساب الإزاحة للترقيم الصفحي
+        # Calculate pagination offset
         offset = (page - 1) * per_page
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # استعلام العد الكلي
+        # Total count query
         cursor.execute("""
             SELECT COUNT(*) FROM user_sessions us
             JOIN users u ON us.user_id = u.id
@@ -886,7 +886,7 @@ async def get_all_active_sessions(
         """)
         total_count = cursor.fetchone()[0]
 
-        # جلب الجلسات من قاعدة البيانات مع معلومات المستخدم
+        # Get sessions from database with user info
         cursor.execute("""
             SELECT 
                 us.id as session_id,
@@ -927,7 +927,7 @@ async def get_all_active_sessions(
                 "user_id": row[3],
                 "phone": row[4],
                 "user_name": f"{row[5] or ''} {row[6] or ''}".strip(),
-                "user_type": "مدير" if row[7] == 1 else "مستخدم عادي",
+                "user_type": "Manager" if row[7] == 1 else "Regular user",
                 "device_info": {
                     "ip_address": row[8],
                     "device_name": row[9],
@@ -939,9 +939,9 @@ async def get_all_active_sessions(
                 "source": "database"
             })
 
-        # جلب الجلسات من الذاكرة المؤقتة عبر TokenHandler
+        # Get sessions from memory cache via TokenHandler
         memory_sessions = []
-        # استخدم الطريقة get_all_sessions الموجودة في TokenHandler
+        # Use the get_all_sessions method from TokenHandler
         raw_memory_sessions = TokenHandler.get_all_sessions()
 
         for session in raw_memory_sessions:
@@ -949,7 +949,7 @@ async def get_all_active_sessions(
                 "token": session["token"],
                 "login_time": session["login_time"],
                 "user_id": session["user_id"],
-                "user_type": "مدير" if session["user_type"] == 1 else "مستخدم عادي",
+                "user_type": "Manager" if session["user_type"] == 1 else "Regular user",
                 "device_info": session.get("device_info", {}),
                 "source": "memory_cache"
             })
@@ -975,139 +975,8 @@ async def get_all_active_sessions(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب الجلسات: {str(e)}"
+            detail=f"Failed to fetch sessions: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
-
-
-# @router.post("/user-notifications", status_code=201)
-# async def create_user_notification(
-#     notification: UserNotificationCreate,
-#     admin_data: dict = Depends(auth_scheme)
-# ):
-#     """إنشاء إشعار لمستخدم معين (بواسطة الأدمن)"""
-#     if admin_data["user_type"] != 1:
-#         raise HTTPException(
-#             status_code=403, detail="Only admins can create user notifications")
-
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-
-#         # التحقق من وجود المستخدم
-#         cursor.execute("SELECT 1 FROM users WHERE id = ?",
-#                        (notification.user_id,))
-#         if not cursor.fetchone():
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # إدراج الإشعار
-#         cursor.execute(
-#             """INSERT INTO notifications 
-#             (user_id, sender_id, message, is_admin) 
-#             VALUES (?, ?, ?, ?)""",
-#             (notification.user_id,
-#              admin_data["user_id"], notification.message, False)
-#         )
-#         conn.commit()
-
-#         return {
-#             "success": True,
-#             "message": "User notification created successfully",
-#             "notification_id": cursor.lastrowid
-#         }
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to create user notification: {str(e)}"
-#         )
-#     finally:
-#         if conn:
-#             conn.close()
-
-
-# @router.get("/user-notifications/{user_id}", response_model=List[dict])
-# async def get_user_notifications_admin(
-#     user_id: int,
-#     admin_data: dict = Depends(auth_scheme)
-# ):
-#     """الحصول على إشعارات مستخدم معين (للأدمن)"""
-#     if admin_data["user_type"] != 1:
-#         raise HTTPException(
-#             status_code=403, detail="Only admins can view user notifications")
-
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-
-#         cursor.execute(
-#             """SELECT n.id, n.message, n.is_read, n.created_at, 
-#                u.first_name || ' ' || u.last_name as sender_name
-#             FROM notifications n
-#             JOIN users u ON n.sender_id = u.id
-#             WHERE n.user_id = ? AND n.is_admin = 0
-#             ORDER BY n.created_at DESC""",
-#             (user_id,)
-#         )
-
-#         notifications = []
-#         for row in cursor.fetchall():
-#             notifications.append({
-#                 "id": row[0],
-#                 "message": row[1],
-#                 "is_read": bool(row[2]),
-#                 "created_at": row[3],
-#                 "sender": row[4]
-#             })
-
-#         return notifications
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to fetch user notifications: {str(e)}"
-#         )
-#     finally:
-#         if conn:
-#             conn.close()
-
-
-# @router.delete("/user-notifications/{notification_id}")
-# async def delete_user_notification_admin(
-#     notification_id: int,
-#     admin_data: dict = Depends(auth_scheme)
-# ):
-#     """حذف إشعار مستخدم (بواسطة الأدمن)"""
-#     if admin_data["user_type"] != 1:
-#         raise HTTPException(
-#             status_code=403, detail="Only admins can delete user notifications")
-
-#     conn = None
-#     try:
-#         conn = get_db_connection()
-#         cursor = conn.cursor()
-
-#         cursor.execute(
-#             "DELETE FROM notifications WHERE id = ? AND is_admin = 0",
-#             (notification_id,)
-#         )
-#         conn.commit()
-
-#         if cursor.rowcount == 0:
-#             raise HTTPException(
-#                 status_code=404, detail="User notification not found")
-
-#         return {
-#             "success": True,
-#             "message": "User notification deleted successfully"
-#         }
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to delete user notification: {str(e)}"
-#         )
-#     finally:
-#         if conn:
-#             conn.close()

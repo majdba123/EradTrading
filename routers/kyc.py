@@ -11,18 +11,19 @@ router = APIRouter(
     tags=["KYC Verification"]
 )
 
+
 @router.post("/submit", response_model=KYCResponse)
 async def submit_kyc(
     kyc_data: KYCCreate,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """تقديم طلب KYC جديد"""
+    """Submit a new KYC request"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من عدم وجود طلب معلق لنفس المستخدم
+        # Check if there's no pending request for the same user
         cursor.execute("""
             SELECT id FROM kyc_verifications 
             WHERE user_id = ? AND status = 'pending'
@@ -30,10 +31,10 @@ async def submit_kyc(
         if cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="لديك طلب KYC قيد المراجعة بالفعل"
+                detail="You already have a pending KYC request"
             )
 
-        # إدخال طلب KYC
+        # Insert KYC request
         cursor.execute("""
             INSERT INTO kyc_verifications (
                 user_id, document_type, document_number,
@@ -48,7 +49,7 @@ async def submit_kyc(
             kyc_data.selfie_image_url
         ))
 
-        # جلب البيانات المدخلة حديثاً
+        # Retrieve the newly inserted data
         kyc_id = cursor.lastrowid
         cursor.execute("""
             SELECT * FROM kyc_verifications WHERE id = ?
@@ -63,29 +64,30 @@ async def submit_kyc(
         if "FOREIGN KEY constraint failed" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="المستخدم غير موجود"
+                detail="User not found"
             )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"خطأ في قاعدة البيانات: {str(e)}"
+            detail=f"Database error: {str(e)}"
         )
     except Exception as e:
         if conn:
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في تقديم طلب KYC: {str(e)}"
+            detail=f"Failed to submit KYC request: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
+
 
 @router.get("/{kyc_id}", response_model=KYCResponse)
 def get_kyc_details(
     kyc_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """الحصول على تفاصيل طلب KYC"""
+    """Get KYC request details"""
     conn = None
     try:
         conn = get_db_connection()
@@ -100,7 +102,7 @@ def get_kyc_details(
         if not kyc_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="طلب KYC غير موجود"
+                detail="KYC request not found"
             )
 
         return dict(kyc_record)
@@ -108,11 +110,12 @@ def get_kyc_details(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب بيانات KYC: {str(e)}"
+            detail=f"Failed to fetch KYC data: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
+
 
 @router.put("/{kyc_id}/review", response_model=KYCResponse)
 def review_kyc(
@@ -120,13 +123,13 @@ def review_kyc(
     update_data: KYCUpdate,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """مراجعة وتحديث حالة طلب KYC"""
+    """Review and update KYC request status"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود طلب KYC
+        # Check if KYC request exists
         cursor.execute("""
             SELECT status FROM kyc_verifications WHERE id = ?
         """, (kyc_id,))
@@ -135,16 +138,16 @@ def review_kyc(
         if not kyc_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="طلب KYC غير موجود"
+                detail="KYC request not found"
             )
 
         if kyc_record['status'] != 'pending':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="تمت مراجعة هذا الطلب مسبقاً"
+                detail="This request has already been reviewed"
             )
 
-        # تحديث حالة KYC
+        # Update KYC status
         cursor.execute("""
             UPDATE kyc_verifications 
             SET status = ?, 
@@ -159,7 +162,7 @@ def review_kyc(
             kyc_id
         ))
 
-        # جلب البيانات المحدثة
+        # Retrieve updated data
         cursor.execute("""
             SELECT * FROM kyc_verifications WHERE id = ?
         """, (kyc_id,))
@@ -173,18 +176,19 @@ def review_kyc(
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في تحديث حالة KYC: {str(e)}"
+            detail=f"Failed to update KYC status: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
+
 
 @router.get("/user/{user_id}", response_model=List[KYCResponse])
 def get_user_kyc_history(
     user_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """الحصول على سجل KYC لمستخدم معين"""
+    """Get KYC history for a specific user"""
     conn = None
     try:
         conn = get_db_connection()
@@ -196,14 +200,14 @@ def get_user_kyc_history(
             WHERE user_id = ?
             ORDER BY created_at DESC
         """, (user_id,))
-        
+
         records = [dict(row) for row in cursor.fetchall()]
         return records
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في جلب سجل KYC: {str(e)}"
+            detail=f"Failed to fetch KYC history: {str(e)}"
         )
     finally:
         if conn:

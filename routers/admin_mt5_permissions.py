@@ -4,98 +4,98 @@ from database.connection import get_db_connection
 from auth import auth_scheme
 import sqlite3
 
-
 router = APIRouter(tags=["MT5 Permissions Management"])
 
 
 def initialize_mt5_permissions():
+    """Initialize MT5 API permissions in the database"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # قائمة بجميع واجهات MT5 API مع وصفها
+        # List of all MT5 API endpoints with their descriptions
         mt5_endpoints = [
             {
                 "name": "mt5_create_account",
                 "path": "/api/mt5/accounts",
-                "description": "إنشاء حساب جديد في MT5",
+                "description": "Create new MT5 account",
                 "required_permission": "mt5_account_management"
             },
             {
                 "name": "mt5_get_accounts",
                 "path": "/api/mt5/accounts/my-accounts",
-                "description": "الحصول على جميع حسابات MT5 الخاصة بالمستخدم",
+                "description": "Get all user's MT5 accounts",
                 "required_permission": "mt5_account_view"
             },
             {
                 "name": "mt5_get_account_info",
                 "path": "/api/mt5/accounts/{login}",
-                "description": "الحصول على معلومات حساب MT5",
+                "description": "Get MT5 account information",
                 "required_permission": "mt5_account_view"
             },
             {
                 "name": "mt5_send_otp",
                 "path": "/api/mt5/auth/send-otp",
-                "description": "إرسال رمز OTP للتحقق",
+                "description": "Send OTP verification code",
                 "required_permission": "mt5_auth"
             },
             {
                 "name": "mt5_change_password",
                 "path": "/api/mt5/accounts/change-password/{login}/",
-                "description": "تغيير كلمة مرور حساب MT5",
+                "description": "Change MT5 account password",
                 "required_permission": "mt5_account_management"
             },
             {
                 "name": "mt5_check_password",
                 "path": "/api/mt5/accounts/check-password/{login_id}",
-                "description": "التحقق من صحة كلمة مرور حساب MT5",
+                "description": "Verify MT5 account password",
                 "required_permission": "mt5_auth"
             },
             {
                 "name": "mt5_update_rights",
                 "path": "/api/mt5/accounts/update-rights/{login_id}",
-                "description": "تحديث صلاحيات حساب MT5",
+                "description": "Update MT5 account permissions",
                 "required_permission": "mt5_account_management"
             },
             {
                 "name": "mt5_deposit",
                 "path": "/api/mt5/accounts/{login}/deposit",
-                "description": "إيداع أموال في حساب MT5",
+                "description": "Deposit funds to MT5 account",
                 "required_permission": "mt5_financial_operations"
             },
             {
                 "name": "mt5_withdraw",
                 "path": "/api/mt5/accounts/{login}/withdraw",
-                "description": "سحب أموال من حساب MT5",
+                "description": "Withdraw funds from MT5 account",
                 "required_permission": "mt5_financial_operations"
             },
             {
                 "name": "mt5_transfer",
                 "path": "/api/mt5/accounts/transfer",
-                "description": "تحويل أموال بين حسابات MT5",
+                "description": "Transfer funds between MT5 accounts",
                 "required_permission": "mt5_financial_operations"
             },
             {
                 "name": "mt5_enable_trading",
                 "path": "/api/mt5/accounts/{login}/enable-trading",
-                "description": "تمكين التداول لحساب MT5",
+                "description": "Enable trading for MT5 account",
                 "required_permission": "mt5_trading_management"
             },
             {
                 "name": "mt5_disable_trading",
                 "path": "/api/mt5/accounts/{login}/disable-trading",
-                "description": "تعطيل التداول لحساب MT5",
+                "description": "Disable trading for MT5 account",
                 "required_permission": "mt5_trading_management"
             }
         ]
 
         for endpoint in mt5_endpoints:
-            # التحقق مما إذا كانت الصلاحية موجودة بالفعل
+            # Check if permission already exists
             cursor.execute(
                 "SELECT 1 FROM permissions WHERE endpoint_name = ?",
-                (endpoint["name"],
-                 ))
+                (endpoint["name"],)
+            )
             if not cursor.fetchone():
                 cursor.execute(
                     """INSERT INTO permissions
@@ -122,7 +122,7 @@ def initialize_mt5_permissions():
 @router.get("/mt5/permissions", summary="Get all MT5 API permissions")
 async def get_mt5_permissions(user_data: dict = Depends(auth_scheme)):
     """
-    الحصول على قائمة بجميع صلاحيات واجهات MT5 API مع حالتها الحالية
+    Get list of all MT5 API permissions with their current status
     """
     conn = None
     try:
@@ -169,11 +169,11 @@ async def update_mt5_permission(
     user_data: dict = Depends(auth_scheme)
 ):
     """
-    تحديث حالة صلاحية MT5
+    Update MT5 permission status
 
-    المطلوب:
+    Required:
     {
-        "is_active": true/false  // الحالة الجديدة للصلاحية
+        "is_active": true/false  // New permission status
     }
     """
     conn = None
@@ -183,7 +183,7 @@ async def update_mt5_permission(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود الصلاحية
+        # Verify permission exists
         cursor.execute(
             "SELECT 1 FROM permissions WHERE id = ? AND endpoint_path LIKE '/api/mt5%'",
             (permission_id,)
@@ -194,7 +194,7 @@ async def update_mt5_permission(
                 detail="Permission not found or not an MT5 permission"
             )
 
-        # تحديث الحالة
+        # Update status
         cursor.execute(
             "UPDATE permissions SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (1 if is_active else 0, permission_id)
@@ -225,8 +225,9 @@ async def block_user_permission(
     admin_data: dict = Depends(auth_scheme)
 ):
     """
-    حظر مستخدم من صلاحية معينة
-    المطلوب: {"user_id": int, "permission_id": int}
+    Block user from specific permission
+
+    Required: {"user_id": int, "permission_id": int}
     """
     conn = None
     try:
@@ -258,8 +259,6 @@ async def block_user_permission(
         if conn:
             conn.close()
 
-# فك حظر مستخدم من صلاحية
-
 
 @router.post("/unblock-permission", status_code=200)
 async def unblock_user_permission(
@@ -267,8 +266,9 @@ async def unblock_user_permission(
     admin_data: dict = Depends(auth_scheme)
 ):
     """
-    فك حظر مستخدم من صلاحية معينة
-    المطلوب: {"user_id": int, "permission_id": int}
+    Unblock user from specific permission
+
+    Required: {"user_id": int, "permission_id": int}
     """
     conn = None
     try:
@@ -301,15 +301,13 @@ async def unblock_user_permission(
         if conn:
             conn.close()
 
-# الحصول على جميع الصلاحيات المحظورة لمستخدم
-
 
 @router.get("/user-blocked-permissions/{user_id}")
 async def get_user_blocked_permissions(
     user_id: int,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """الحصول على قائمة جميع الصلاحيات المحظورة لمستخدم معين"""
+    """Get list of all blocked permissions for a specific user"""
     conn = None
     try:
         conn = get_db_connection()
