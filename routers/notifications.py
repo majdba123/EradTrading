@@ -6,8 +6,8 @@ from auth import auth_scheme
 from typing import List, Optional
 from pydantic import BaseModel
 import sqlite3
-from datetime import datetime  # Add this import at the top of your file
-from websocket_manager import websocket_manager  # استيراد مدير WebSocket
+from datetime import datetime
+from websocket_manager import websocket_manager  # Import WebSocket manager
 import asyncio
 
 from fastapi import Query, HTTPException
@@ -21,12 +21,13 @@ class NotificationCreate(BaseModel):
 
 class NotificationUpdate(BaseModel):
     message: str
-    
+
+
 class Is_Read(BaseModel):
     is_read: int = 3  # Optional for admin notifications
 
 
-# --- إشعارات الأدمن (على مستوى التطبيق) ---
+# --- Admin Notifications (Application-wide) ---
 
 
 @router.post("/admin/notifications", status_code=201)
@@ -34,7 +35,7 @@ async def create_admin_notification(
     notification: NotificationCreate,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """إنشاء إشعار على مستوى التطبيق (لجميع المستخدمين)"""
+    """Create application-wide notification (for all users)"""
     if admin_data["user_type"] != 1:  # 1 for admin
         raise HTTPException(
             status_code=403, detail="Only admins can create global notifications")
@@ -44,20 +45,22 @@ async def create_admin_notification(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # is_admin=1 للإشعارات العامة
+        # is_admin=1 for global notifications
         cursor.execute(
             """INSERT INTO notifications (user_id, message, is_admin)
             VALUES (?, ?, 1)""",
-            (0, notification.message)  # user_id=0 للإشعارات العامة
+            (0, notification.message)  # user_id=0 for global notifications
         )
         conn.commit()
-        
+
         broadcast_msg = {
-            "type": "admin_notification",  # أضف هذا الحقل
-            "message": notification.message,  # تأكد من وجود حقل "message"
+            "type": "admin_notification",  # Add this field
+            "message": notification.message,  # Ensure "message" field exists
             "timestamp": datetime.now().isoformat()
         }
-        print(f"Broadcasting to {len(websocket_manager.active_public_connections)} public connections")  # عدد المتصلين
+        # Number of connections
+        print(
+            f"Broadcasting to {len(websocket_manager.active_public_connections)} public connections")
         await websocket_manager.broadcast_notification(broadcast_msg)
 
         return {
@@ -79,7 +82,7 @@ async def create_admin_notification(
 async def get_all_admin_notifications(
     admin_data: dict = Depends(auth_scheme)
 ):
-    """الحصول على جميع إشعارات الأدمن (على مستوى التطبيق)"""
+    """Get all admin notifications (application-wide)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can view global notifications")
@@ -121,7 +124,7 @@ async def update_admin_notification(
     notification: NotificationUpdate,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """تحديث إشعار أدمن"""
+    """Update admin notification"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can update global notifications")
@@ -162,7 +165,7 @@ async def delete_admin_notification(
     notification_id: int,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """حذف إشعار أدمن"""
+    """Delete admin notification"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can delete global notifications")
@@ -210,7 +213,7 @@ async def create_user_notification(
     notification: NotificationBase,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """إنشاء إشعار لمستخدم معين (is_admin=0)"""
+    """Create notification for specific user (is_admin=0)"""
     if admin_data.get("user_type") != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can create user notifications")
@@ -223,13 +226,13 @@ async def create_user_notification(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود المستخدم
+        # Verify user exists
         cursor.execute("SELECT 1 FROM users WHERE id = ?",
-                      (notification.user_id,))
+                       (notification.user_id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="User not found")
 
-        # إدراج الإشعار في قاعدة البيانات
+        # Insert notification into database
         cursor.execute(
             """INSERT INTO notifications (user_id, message, is_admin)
             VALUES (?, ?, ?)""",
@@ -237,7 +240,7 @@ async def create_user_notification(
         )
         notification_id = cursor.lastrowid
 
-        # إعداد إشعار WebSocket
+        # Prepare WebSocket notification
         ws_notification = {
             "type": "status_update",
             "message": notification.message,
@@ -245,14 +248,15 @@ async def create_user_notification(
             "user_id": str(notification.user_id)
         }
 
-        # إرسال إشعار الوقت الحقيقي
-        print(f"Attempting to send notification to user {notification.user_id}")
+        # Send real-time notification
+        print(
+            f"Attempting to send notification to user {notification.user_id}")
         await websocket_manager.send_personal_notification(str(notification.user_id), ws_notification)
         await asyncio.sleep(0.1)
 
         print("Notification sent successfully")
-        
-        # تخزين الإشعار في قاعدة البيانات (إذا كان store_notification مطلوبًا)
+
+        # Store notification in database (if store_notification is required)
         try:
             from models.notifications import store_notification
             stored_id = store_notification(
@@ -293,7 +297,7 @@ async def get_user_notifications(
     user_id: int,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """الحصول على إشعارات مستخدم معين (للأدمن)"""
+    """Get notifications for specific user (admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403, detail="Only admins can view user notifications")
@@ -333,10 +337,10 @@ async def get_user_notifications(
 @router.put("/admin/user-notifications/{notification_id}")
 async def update_user_notification(
     notification_id: int,
-    notification: NotificationBase2,  # بدون حقل user_id الآن
+    notification: NotificationBase2,  # Without user_id field now
     admin_data: dict = Depends(auth_scheme)
 ):
-    """تعديل محتوى إشعار لمستخدم معين (مع الحفاظ على user_id الأصلي)"""
+    """Update content of user notification (preserving original user_id)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403,
@@ -348,7 +352,7 @@ async def update_user_notification(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # جلب user_id الأصلي أولاً
+        # Get original user_id first
         cursor.execute(
             "SELECT user_id FROM notifications WHERE id = ? AND is_admin = 0",
             (notification_id,)
@@ -361,7 +365,7 @@ async def update_user_notification(
                 detail="User notification not found or not editable"
             )
 
-        # التحديث مع الحفاظ على user_id الأصلي
+        # Update while preserving original user_id
         cursor.execute(
             """UPDATE notifications 
             SET message = ?
@@ -373,7 +377,7 @@ async def update_user_notification(
         return {
             "success": True,
             "message": "User notification content updated successfully",
-            "user_id": existing_notification[0]  # إرجاع user_id الأصلي
+            "user_id": existing_notification[0]  # Return original user_id
         }
     except Exception as e:
         raise HTTPException(
@@ -390,7 +394,7 @@ async def delete_user_notification(
     notification_id: int,
     admin_data: dict = Depends(auth_scheme)
 ):
-    """حذف إشعار لمستخدم معين (للأدمن فقط)"""
+    """Delete user notification (admin only)"""
     if admin_data["user_type"] != 1:
         raise HTTPException(
             status_code=403,
@@ -402,7 +406,7 @@ async def delete_user_notification(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود الإشعار وأنه من نوع user (is_admin=0)
+        # Verify notification exists and is user type (is_admin=0)
         cursor.execute(
             "DELETE FROM notifications WHERE id = ? AND is_admin = 0",
             (notification_id,)
@@ -429,16 +433,16 @@ async def delete_user_notification(
             conn.close()
 
 
-
-
 @router.get("/user/my-notifications", response_model=List[dict])
 async def get_my_notifications(
-    is_read: Optional[int] = Query(3, description="Filter by read status (0=unread, 1=read, 3=all)"),
+    is_read: Optional[int] = Query(
+        3, description="Filter by read status (0=unread, 1=read, 3=all)"),
     user_data: dict = Depends(auth_scheme)
 ):
     """Get my notifications with flexible read status filtering"""
-    print(f"DEBUG: Received request - is_read={is_read}, user_id={user_data.get('user_id')}")  # Debug log
-    
+    print(
+        f"DEBUG: Received request - is_read={is_read}, user_id={user_data.get('user_id')}")  # Debug log
+
     conn = None
     try:
         conn = get_db_connection()
@@ -497,20 +501,19 @@ async def get_my_notifications(
     finally:
         if conn:
             conn.close()
-            
-            
+
 
 @router.put("/user/notifications/mark-all-read")
 async def mark_all_as_read(
     user_data: dict = Depends(auth_scheme)
 ):
-    """تحديد جميع إشعارات المستخدم كمقروءة"""
+    """Mark all user notifications as read"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # تحديث جميع إشعارات المستخدم غير المقروءة
+        # Update all unread user notifications
         cursor.execute(
             """UPDATE notifications 
             SET is_read = 1 
@@ -518,22 +521,22 @@ async def mark_all_as_read(
             AND is_read = 0""",
             (user_data["user_id"],)
         )
-        
+
         updated_count = cursor.rowcount
         conn.commit()
 
         return {
             "success": True,
-            "message": f"تم تحديد {updated_count} إشعار كمقروء",
+            "message": f"Marked {updated_count} notifications as read",
             "updated_count": updated_count
         }
-        
+
     except Exception as e:
         if conn:
             conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"فشل في تحديث الإشعارات: {str(e)}"
+            detail=f"Failed to update notifications: {str(e)}"
         )
     finally:
         if conn:

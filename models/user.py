@@ -1,6 +1,7 @@
 import sqlite3
 from database.connection import get_db_connection
 
+
 def create_users_table():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -13,12 +14,10 @@ def create_users_table():
         last_name TEXT,
         status TEXT DEFAULT 'pending',  -- pending, approved, rejected, banned
         type INTEGER DEFAULT 0, 
-        password TEXT NOT NULL,
-
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
-    conn.commit() 
+    conn.commit()
     conn.close()
 
 
@@ -42,7 +41,8 @@ def create_user_devices_table():
     """)
     conn.commit()
     conn.close()
-    
+
+
 def create_user_sessions_table():
     conn = get_db_connection()
     cursor = conn.cursor()

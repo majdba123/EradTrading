@@ -382,7 +382,6 @@ async def assign_user_to_manager(
             VALUES (?, ?)
         """, (manager_id, request.user_id))
         conn.commit()
-        # إعداد الإشعار
         notification = {
             "type": "manager_assigned",
             "message": f"You have been assigned to manager ID: {manager_id}",
@@ -390,14 +389,12 @@ async def assign_user_to_manager(
             "user_id": str(request.user_id)
         }
         
-        # إرسال إشعار الوقت الحقيقي
         print(f"Attempting to send notification to user {request.user_id}")
         await websocket_manager.send_personal_notification(str(request.user_id), notification)
         await asyncio.sleep(0.1)  # Small delay to let other transactions complete
 
         print("Notification sent successfully")
         
-        # تخزين الإشعار في قاعدة البيانات
         from models.notifications import store_notification
         try:
             notification_id = store_notification(
@@ -682,7 +679,6 @@ async def update_user_status(
                 (status_data.user_id,)
             )
         conn.commit()
-        # إعداد الإشعار
         notification = {
             "type": "status_update",
             "message": f"Your account status has been updated to: {status_data.new_status}",
@@ -690,14 +686,12 @@ async def update_user_status(
             "user_id": str(status_data.user_id)
         }
         
-        # إرسال إشعار الوقت الحقيقي
         print(f"Attempting to send notification to user {status_data.user_id}")
         await websocket_manager.send_personal_notification(str(status_data.user_id), notification)
         await asyncio.sleep(0.1)  # Small delay to let other transactions complete
 
         print("Notification sent successfully")
         
-        # تخزين الإشعار في قاعدة البيانات
         from models.notifications import store_notification
         try:
             notification_id = store_notification(
@@ -855,7 +849,7 @@ async def approve_user_account(
             "type": "account_approved",
             "message": "Your account registration has been approved by the administrator.",
             "timestamp": datetime.datetime.now().isoformat(),
-            "user_id": str(user_id)  # تحويل إلى string هنا
+            "user_id": str(user_id) 
         }
         
         # Send real-time notification
@@ -943,7 +937,7 @@ async def reject_user_account(
             "type": "account_rejected",
             "message": "Your account registration has been rejected by the administrator.",
             "timestamp": datetime.datetime.now().isoformat(),
-            "user_id": str(user_id)  # تحويل إلى string هنا
+            "user_id": str(user_id) 
         }
 
         # Send real-time notification

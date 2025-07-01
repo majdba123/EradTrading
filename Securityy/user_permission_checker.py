@@ -15,7 +15,6 @@ class UserPermissionChecker:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # 1. الحصول على id الصلاحية من اسمها
             cursor.execute(
                 "SELECT id FROM permissions WHERE endpoint_name = ?",
                 (self.endpoint_name,)
@@ -30,7 +29,6 @@ class UserPermissionChecker:
 
             permission_id = permission[0]
 
-            # 2. التحقق من وجود الحظر في user_deny_permissions
             cursor.execute(
                 """SELECT 1 FROM user_deny_permissions 
                 WHERE user_id = ? AND permission_id = ?""",

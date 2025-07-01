@@ -2,7 +2,6 @@ import sqlite3
 from database.connection import get_db_connection
 
 def create_managers_table():
-    """إنشاء جدول المديرين مع العلاقة بجدول المستخدمين"""
     conn = get_db_connection()
     cursor = conn.cursor()
     

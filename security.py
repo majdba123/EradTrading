@@ -1,17 +1,19 @@
 from cryptography.fernet import Fernet, InvalidToken
 from typing import Optional
 
+
 class PasswordCipher:
     """
-    فئة لعمليات التشفير وفك التشفير باستخدام Fernet
-    يجب توفير مفتاح ثابت عند إنشاء الكائن للحفاظ على إمكانية فك تشفير البيانات القديمة
+    Class for encryption and decryption operations using Fernet.
+    A constant key must be provided when creating the object to maintain 
+    the ability to decrypt old data.
     """
-    
+
     def __init__(self, key: bytes) -> None:
         """
-        تهيئة كائن التشفير
-        
-        :param key: مفتاح Fernet ثابت (يجب حفظه بشكل آمن)
+        Initialize the cipher object.
+
+        :param key: Constant Fernet key (must be stored securely)
         :type key: bytes
         """
         self.key = key
@@ -19,35 +21,36 @@ class PasswordCipher:
 
     def encrypt_password(self, password: str) -> str:
         """
-        تشفير كلمة المرور
-        
-        :param password: كلمة المرور النصية
-        :return: كلمة المرور المشفرة
+        Encrypt a password.
+
+        :param password: Plain text password
+        :return: Encrypted password
         :rtype: str
         """
         return self.cipher.encrypt(password.encode()).decode()
 
     def decrypt_password(self, encrypted_password: str) -> Optional[str]:
         """
-        فك تشفير كلمة المرور
-        
-        :param encrypted_password: كلمة المرور المشفرة
-        :return: كلمة المرور النصية أو None إذا فشل فك التشفير
+        Decrypt a password.
+
+        :param encrypted_password: Encrypted password
+        :return: Plain text password or None if decryption fails
         :rtype: Optional[str]
         """
         try:
             return self.cipher.decrypt(encrypted_password.encode()).decode()
         except InvalidToken:
-            print("فشل فك التشفير: المفتاح غير صالح أو البيانات تالفة")
+            print("Decryption failed: Invalid key or corrupted data")
             return None
         except Exception as e:
-            print(f"حدث خطأ أثناء فك التشفير: {str(e)}")
+            print(f"Error during decryption: {str(e)}")
             return None
 
 
-# مفتاح التشفير الثابت (يجب حفظه في مكان آمن)
-# يمكن إنشاؤه مرة واحدة باستخدام Fernet.generate_key() ثم حفظه
-ENCRYPTION_KEY = b'2xgchEDOPMIqyu2oKeDS1yO_ik7iB6rUVUfsTMDHOzQ='  # استبدل هذا بالمفتاح الفعلي
+# Constant encryption key (must be stored securely)
+# Can be generated once using Fernet.generate_key() and then stored
+# Replace this with your actual key
+ENCRYPTION_KEY = b'2xgchEDOPMIqyu2oKeDS1yO_ik7iB6rUVUfsTMDHOzQ='
 
-# إنشاء كائن التشفير
+# Create cipher object
 cipher = PasswordCipher(ENCRYPTION_KEY)

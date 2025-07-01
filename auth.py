@@ -7,25 +7,25 @@ from helpers.device_info import get_device_info
 from database.connection import get_db_connection
 import sqlite3
 
-# تخزين الجلسات في الذاكرة
+# Store sessions in memory
 sessions_cache: Dict[str, dict] = {}
 
 
 class TokenHandler:
     @staticmethod
     def generate_token() -> str:
-        """إنشاء توكن عشوائي آمن"""
+        """Generate a secure random token"""
         return secrets.token_hex(32)
 
     @staticmethod
     def create_session(user_id: int, user_type: int, request: Request = None) -> str:
-        """إنشاء جلسة جديدة مع معلومات المستخدم والجهاز"""
+        """Create a new session with user and device information"""
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # جلب بيانات المستخدم
+            # Get user data
             cursor.execute(
                 """SELECT first_name, last_name, status 
                 FROM users WHERE id = ?""",
@@ -36,21 +36,21 @@ class TokenHandler:
             if not user_data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="المستخدم غير موجود"
+                    detail="User not found"
                 )
 
             if user_data[2] == 'banned':
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="حسابك محظور ولا يمكنك تسجيل الدخول"
+                    detail="Your account is banned and cannot log in"
                 )
 
             first_name, last_name, _ = user_data
 
-            # جمع معلومات الجهاز
+            # Collect device information
             device_info = get_device_info(request) if request else {}
 
-            # إنشاء التوكن
+            # Generate token
             token = TokenHandler.generate_token()
             expires_at = datetime.now() + timedelta(hours=24)
 
@@ -62,7 +62,7 @@ class TokenHandler:
                 "device_info": device_info
             }
 
-            # تخزين في قاعدة البيانات
+            # Store in database
             cursor.execute(
                 """INSERT INTO user_devices 
                 (user_id, ip_address, device_name, 
@@ -86,16 +86,15 @@ class TokenHandler:
         except sqlite3.Error as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"خطأ في قاعدة البيانات: {str(e)}"
+                detail=f"Database error: {str(e)}"
             )
         finally:
             if conn:
                 conn.close()
 
-
     @staticmethod
     def get_all_sessions() -> List[dict]:
-        """الحصول على جميع الجلسات النشطة (للمدير)"""
+        """Get all active sessions (for admin)"""
         active_sessions = []
         for token, session in sessions_cache.items():
             if datetime.now() < session["expires_at"]:
@@ -110,18 +109,18 @@ class TokenHandler:
 
     @staticmethod
     def validate_token(token: str) -> Optional[dict]:
-        """التحقق من صحة التوكن مع تحديث معلومات النشاط"""
+        """Validate token and update activity information"""
         if token not in sessions_cache:
             return None
 
         session = sessions_cache[token]
 
-        # التحقق من انتهاء الصلاحية
+        # Check expiration
         if datetime.now() > session["expires_at"]:
             del sessions_cache[token]
             return None
 
-        # التحقق من حالة المستخدم في قاعدة البيانات
+        # Check user status in database
         conn = None
         try:
             conn = get_db_connection()
@@ -148,13 +147,13 @@ class TokenHandler:
 
     @staticmethod
     def delete_session(token: str):
-        """حذف جلسة المستخدم"""
+        """Delete user session"""
         if token in sessions_cache:
             del sessions_cache[token]
 
     @staticmethod
     def delete_all_user_sessions(user_id: int):
-        """حذف جميع جلسات المستخدم"""
+        """Delete all user sessions"""
         global sessions_cache
         sessions_cache = {
             t: s for t, s in sessions_cache.items()
@@ -163,7 +162,7 @@ class TokenHandler:
 
     @staticmethod
     def get_user_sessions(user_id: int) -> list:
-        """الحصول على جميع جلسات المستخدم النشطة"""
+        """Get all active user sessions"""
         return [
             {"token": t, **s}
             for t, s in sessions_cache.items()
@@ -172,7 +171,7 @@ class TokenHandler:
 
 
 class JWTBearer(HTTPBearer):
-    """Dependency للتحقق من التوكن في المسارات"""
+    """Dependency for token verification in routes"""
 
     async def __call__(self, request: Request) -> dict:
         credentials: HTTPAuthorizationCredentials = await super().__call__(request)
@@ -189,7 +188,7 @@ class JWTBearer(HTTPBearer):
                 detail="Invalid or expired token",
             )
 
-        # تحديث معلومات النشاط الأخير
+        # Update last activity information
         session["last_activity"] = datetime.now()
         session["token"] = credentials.credentials
 
@@ -197,21 +196,20 @@ class JWTBearer(HTTPBearer):
 
 
 class AdminTokenHandler(HTTPBearer):
-    """مخصص للتحقق من توكن المدير"""
+    """Custom handler for admin token verification"""
 
     async def __call__(self, request: Request) -> dict:
         credentials = await super().__call__(request)
         session = TokenHandler.validate_token(credentials.credentials)
 
-        if not session or session["user_type"] != 1:  # 1 = مدير
+        if not session or session["user_type"] != 1:  # 1 = admin
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="صلاحية غير كافية"
+                detail="Insufficient permissions"
             )
 
         return session
 
 
 admin_scheme = AdminTokenHandler()
-
 auth_scheme = JWTBearer()

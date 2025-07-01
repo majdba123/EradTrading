@@ -24,7 +24,6 @@ def create_kyc_table():
     )
     """)
     
-    # إنشاء فهرس لتحسين الأداء
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kyc_user ON kyc_verifications(user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kyc_status ON kyc_verifications(status)")
     

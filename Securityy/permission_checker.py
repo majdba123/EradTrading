@@ -5,10 +5,8 @@ from auth import auth_scheme
 
 
 async def check_permission(request: Request):
-    """تحقق من حالة صلاحية الواجهة"""
     path = request.url.path
     
-    # استثناء المسارات التي لا تحتاج تحقق
     if path in ['/docs', '/openapi.json']:
         return True
         

@@ -40,18 +40,18 @@ async def authenticate(user_data: Union[UserLogin, UserRegister], request: Reque
 
         # Check if user exists
         cursor.execute(
-            "SELECT id, password, status, type FROM users WHERE phone = ?",
+            "SELECT id, passcode, status, type FROM users WHERE phone = ?",
             (user_data.phone,)
         )
         existing_user = cursor.fetchone()
 
         if existing_user:
             # LOGIN FLOW
-            user_id, stored_password, user_status, user_type = existing_user
+            user_id, stored_passcode, user_status, user_type = existing_user
 
             # Verify password
-            encrypted_password = cipher.decrypt_password(stored_password)
-            if not user_data.password == encrypted_password:
+            encrypted_password = cipher.decrypt_password(stored_passcode)
+            if not user_data.passcode == encrypted_password:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid credentials"
@@ -82,15 +82,15 @@ async def authenticate(user_data: Union[UserLogin, UserRegister], request: Reque
                     detail="First name and last name are required for registration"
                 )
 
-            encrypted_password = cipher.encrypt_password(user_data.password)
+            encrypted_password = cipher.encrypt_password(user_data.passcode)
 
             # Create new account with fixed passcode and 'pending_approval' status
             cursor.execute(
                 """INSERT INTO users 
-                (phone, passcode, first_name, last_name, type, status, password) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (user_data.phone, user_data.passcode, user_data.first_name,
-                 user_data.last_name, 0, 'pending_approval', encrypted_password)
+                (phone, passcode, first_name, last_name, type, status) 
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_data.phone, encrypted_password, user_data.first_name,
+                 user_data.last_name, 0, 'pending_approval')
             )
             user_id = cursor.lastrowid
             user_type = 0

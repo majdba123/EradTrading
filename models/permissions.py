@@ -36,7 +36,6 @@ def create_user_permissions_tables():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # جدول حظر الصلاحيات
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_deny_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

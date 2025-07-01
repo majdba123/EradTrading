@@ -1,28 +1,26 @@
 # seeder/user_seeder.py
 from database.connection import get_db_connection
 import sqlite3
-from security import cipher  # استيراد كائن التشفير
+from security import cipher 
 
 
 def seed_users():
     conn = get_db_connection()
     cursor = conn.cursor()
-    x= cipher.encrypt_password("123456789")
-    # بيانات المستخدم الافتراضي
+    x= cipher.encrypt_password("123456")
     default_user = {
         'phone': '0123456789',
-        'passcode': '123456',
+        'passcode': x,
         'status': 'approved',
         'type': 1,
-        'password': x,
     }
-
+ 
     try: 
         cursor.execute("""
-        INSERT INTO users (phone, passcode, status, type,password)
-        VALUES (?, ?, ?, ?,?)
+        INSERT INTO users (phone, passcode, status, type)
+        VALUES (?, ?, ?, ?)
         """, (default_user['phone'], default_user['passcode'],
-              default_user['status'], default_user['type'],default_user['password']))
+              default_user['status'], default_user['type']))
 
         conn.commit()
         print("User seeded successfully!")

@@ -1,5 +1,5 @@
 import sqlite3
-from security import cipher  # استيراد كائن التشفير
+from security import cipher  # Import encryption object
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from database.connection import get_db_connection
 from schemas.mt5 import (
@@ -45,14 +45,14 @@ async def create_mt5_account_request(
     _: bool = Depends(check_permission),
 ):
     """
-    إنشاء طلب جديد لحساب MT5 (يحتاج موافقة الإدارة)
+    Create new MT5 account request (requires admin approval)
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود نوع الحساب في جدول account_types
+        # Verify account type exists in account_types table
         cursor.execute(
             "SELECT id FROM account_types WHERE name = ?",
             (account_data["account_type"],)
@@ -62,10 +62,10 @@ async def create_mt5_account_request(
         if not account_type:
             raise HTTPException(
                 status_code=400,
-                detail="نوع الحساب غير صالح. الرجاء اختيار نوع حساب موجود."
+                detail="Invalid account type. Please select an existing account type."
             )
 
-        # جلب بيانات المستخدم للتحقق فقط
+        # Get user data for verification
         cursor.execute(
             "SELECT id FROM users WHERE id = ?",
             (user_data["user_id"],)
@@ -75,7 +75,7 @@ async def create_mt5_account_request(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # تخزين طلب الحساب في قاعدة البيانات (بدون بيانات MT5 بعد)
+        # Store account request in database (without MT5 data yet)
         cursor.execute(
             """INSERT INTO user_mt5_accounts 
             (user_id, account_type, status) 
@@ -83,28 +83,28 @@ async def create_mt5_account_request(
             (
                 user_data["user_id"],
                 account_data["account_type"],
-                "pending"  # الحالة الافتراضية
+                "pending"  # Default status
             )
         )
         conn.commit()
 
         return {
             "success": True,
-            "message": "تم إنشاء طلب حساب MT5 بنجاح وهو بانتظار الموافقة من الإدارة",
+            "message": "MT5 account request created successfully and is pending admin approval",
             "status": "pending"
         }
 
     except sqlite3.IntegrityError as e:
         raise HTTPException(
             status_code=400,
-            detail=f"حدث خطأ في إنشاء طلب الحساب: {str(e)}"
+            detail=f"Account request creation error: {str(e)}"
         )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
@@ -119,7 +119,7 @@ async def approve_mt5_account(
     _: bool = Depends(check_permission),
 ):
     """
-    الموافقة على حساب MT5 وإنشاؤه فعلياً في نظام MT5
+    Approve MT5 account and create it in the MT5 system
     """
     client = get_mt5_client()
     conn = None
@@ -127,7 +127,7 @@ async def approve_mt5_account(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # جلب بيانات الطلب
+        # Get request data
         cursor.execute(
             """SELECT u.id, u.first_name, u.last_name, a.account_type 
             FROM user_mt5_accounts a
@@ -140,12 +140,12 @@ async def approve_mt5_account(
         if not account_request:
             raise HTTPException(
                 status_code=404,
-                detail="طلب الحساب غير موجود أو ليس في حالة انتظار الموافقة"
+                detail="Account request not found or not in pending status"
             )
 
         user_id, first_name, last_name, account_type = account_request
 
-        # إنشاء الحساب في MT5
+        # Create account in MT5
         result = client.create_account(
             first_name=first_name,
             last_name=last_name,
@@ -155,7 +155,7 @@ async def approve_mt5_account(
         encrypted_investor_password = cipher.encrypt_password(
             result["investor_password"])
 
-        # تحديث سجل الحساب ببيانات MT5 الفعلية
+        # Update account record with actual MT5 data
         cursor.execute(
             """UPDATE user_mt5_accounts 
             SET mt5_login_id = ?, 
@@ -174,7 +174,7 @@ async def approve_mt5_account(
 
         return {
             "success": True,
-            "message": "تمت الموافقة على الحساب وإنشاؤه في نظام MT5 بنجاح",
+            "message": "Account approved and created in MT5 system successfully",
             "account_id": account_id,
             "mt5_login_id": result["login"],
             "new_status": "approved"
@@ -183,7 +183,7 @@ async def approve_mt5_account(
     except HTTPException:
         raise
     except Exception as e:
-        # في حالة فشل إنشاء الحساب في MT5، نرجع الحالة إلى pending
+        # If MT5 account creation fails, revert status to pending
         if conn:
             cursor.execute(
                 "UPDATE user_mt5_accounts SET status = 'pending' WHERE id = ?",
@@ -192,7 +192,7 @@ async def approve_mt5_account(
             conn.commit()
         raise HTTPException(
             status_code=500,
-            detail=f"حدث خطأ أثناء إنشاء الحساب في MT5: {str(e)}"
+            detail=f"Error creating account in MT5: {str(e)}"
         )
     finally:
         if conn:
@@ -207,14 +207,14 @@ async def reject_mt5_account(
     _: bool = Depends(check_permission),
 ):
     """
-    رفض طلب إنشاء حساب MT5
+    Reject MT5 account creation request
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # التحقق من وجود الطلب
+        # Verify request exists
         cursor.execute(
             "SELECT id FROM user_mt5_accounts WHERE id = ? AND status = 'pending'",
             (account_id,)
@@ -224,10 +224,10 @@ async def reject_mt5_account(
         if not account:
             raise HTTPException(
                 status_code=404,
-                detail="طلب الحساب غير موجود أو ليس في حالة انتظار الموافقة"
+                detail="Account request not found or not in pending status"
             )
 
-        # تحديث حالة الحساب إلى مرفوض
+        # Update account status to rejected
         cursor.execute(
             "UPDATE user_mt5_accounts SET status = 'rejected' WHERE id = ?",
             (account_id,)
@@ -236,7 +236,7 @@ async def reject_mt5_account(
 
         return {
             "success": True,
-            "message": "تم رفض طلب الحساب بنجاح",
+            "message": "Account request rejected successfully",
             "account_id": account_id,
             "new_status": "rejected"
         }
@@ -246,14 +246,11 @@ async def reject_mt5_account(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"حدث خطأ غير متوقع: {str(e)}"
+            detail=f"An unexpected error occurred: {str(e)}"
         )
     finally:
         if conn:
             conn.close()
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
 
 
 @router.get("/accounts/my-accounts", response_model=list, summary="Get all my MT5 accounts")
@@ -261,19 +258,18 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme),
                               _: bool = Depends(check_permission),
                               has_permission: bool = Depends(
                                   UserPermissionChecker("mt5_get_accounts"))
-
                               ):
     """
-    الحصول على جميع حسابات MT5 الخاصة بالمستخدم الحالي مع فك تشفير كلمات المرور
+    Get all MT5 accounts for current user with decrypted passwords
 
-    يتم في كل طلب:
-    1. جلب الحسابات من قاعدة البيانات
-    2. فك تشفير كلمات المرور لكل حساب
-    3. إرجاع البيانات مع كلمات المرور المفكوكة
+    For each request:
+    1. Get accounts from database
+    2. Decrypt passwords for each account
+    3. Return data with decrypted passwords
     """
     conn = None
     try:
-        # 1. جلب الحسابات من قاعدة البيانات
+        # 1. Get accounts from database
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -293,17 +289,17 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme),
         for account in accounts:
             login = account[0]
 
-            # 2. فك تشفير كلمات المرور لكل حساب
+            # 2. Decrypt passwords for each account
             try:
-                # الحصول على كلمة المرور الرئيسية المفكوكة
+                # Get decrypted main password
                 password = cipher.decrypt_password(
                     account[1]) if account[1] else None
 
-                # الحصول على كلمة مرور المستثمر المفكوكة
+                # Get decrypted investor password
                 investor_password = cipher.decrypt_password(
                     account[2]) if account[2] else None
 
-                # 3. إضافة الحساب مع كلمات المرور المفكوكة
+                # 3. Add account with decrypted passwords
                 result.append({
                     "login": login,
                     "password": password,
@@ -313,7 +309,7 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme),
                 })
 
             except Exception as decrypt_error:
-                # في حالة فشل فك التشفير، نرجع كلمة مرور مخفية
+                # If decryption fails, return hidden password
                 print(
                     f"Account password decryption failed {login}: {str(decrypt_error)}")
                 result.append({
@@ -342,24 +338,18 @@ async def get_my_mt5_accounts(user_data: dict = Depends(auth_scheme),
             conn.close()
 
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
-
 @router.get("/accounts/{login}", response_model=MT5AccountInfo, summary="Get MT5 account information")
 async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                          has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))):
+                          has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    الحصول على معلومات حساب MT5
+    Get MT5 account information
 
-    المتطلبات:
-    - **login**: رقم حساب MT5 (يجب أن يكون الحساب مسجلاً للمستخدم الحالي)
+    Requirements:
+    - **login**: MT5 account number (must belong to authenticated user)
     """
     conn = None
     try:
-        # التحقق من أن الحساب يخص المستخدم الحالي
+        # Verify account belongs to authenticated user
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -374,7 +364,7 @@ async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme), _:
                 detail="You do not have access to this account."
             )
 
-        # جلب معلومات الحساب من MT5
+        # Get account info from MT5
         client = get_mt5_client()
         account_info = client.get_account_info(login)
 
@@ -401,23 +391,18 @@ async def get_mt5_account(login: int, user_data: dict = Depends(auth_scheme), _:
             conn.close()
 
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
-@router.post("/auth/send-otp", response_model=dict, summary="Send OTP verification code",)
+@router.post("/auth/send-otp", response_model=dict, summary="Send OTP verification code")
 async def send_otp(
     phone_data: dict,
     user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-    has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))
+    has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))
 ):
     """
-    إرسال رمز OTP إلى رقم الهاتف
+    Send OTP code to phone number
 
-    المطلوب:
+    Required:
     {
-        "phone": "رقم الهاتف (مع مفتاح الدولة)"
+        "phone": "Phone number (with country code)"
     }
     """
     try:
@@ -435,8 +420,9 @@ async def send_otp(
             "success": True,
             "message": "Verification code sent",
             "phone": phone,
-            "otp_ref": result.get("otp_ref"),  # مرجع للتحقق لاحقاً
-            "expires_in": 300  # ثانية (5 دقائق)
+            # Reference for later verification
+            "otp_ref": result.get("otp_ref"),
+            "expires_in": 300  # Seconds (5 minutes)
         }
 
     except SCBAPIError as e:
@@ -446,30 +432,24 @@ async def send_otp(
         )
 
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
-
 @router.post("/accounts/change-password/{login}/", summary="Change MT5 account password")
 async def change_mt5_password(
     login: int,
     password_data: MT5PasswordChange,
     user_data: dict = Depends(auth_scheme),
     _: bool = Depends(check_permission),
-    has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))
+    has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))
 ):
     """
-    تغيير كلمة مرور حساب MT5 وتحديثها في قاعدة البيانات
+    Change MT5 account password and update in database
 
-    المتطلبات:
-    - **new_password**: كلمة المرور الجديدة
-    - **password_type**: نوع كلمة المرور (MAIN أو INVESTOR)
+    Requirements:
+    - **new_password**: New password
+    - **password_type**: Password type (MAIN or INVESTOR)
     """
     conn = None
     try:
-        # التحقق من أن الحساب يخص المستخدم الحالي
+        # Verify account belongs to current user
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -484,7 +464,7 @@ async def change_mt5_password(
                 detail="You do not have access to this account."
             )
 
-        # تغيير كلمة المرور في MT5
+        # Change password in MT5
         client = get_mt5_client()
         new_password = client.generate_password(8)
 
@@ -500,7 +480,7 @@ async def change_mt5_password(
                 detail="MT5 password change failed"
             )
 
-        # تحديث كلمة المرور في قاعدة البيانات (مع التشفير)
+        # Update password in database (with encryption)
         encrypted_password = cipher.encrypt_password(new_password)
 
         if password_data.password_type == "MAIN":
@@ -539,38 +519,33 @@ async def change_mt5_password(
         if conn:
             conn.close()
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
 
 @router.post("/accounts/check-password/{login_id}", response_model=dict, summary="Verify your MT5 account password")
 async def verify_mt5_password(
-    login_id: int,  # سيستقبل login_id كمسار في الرابط
-    password_request: dict,  # سيستقبل كلمة المرور ونوعها
+    login_id: int,  # Receives login_id as path parameter
+    password_request: dict,  # Receives password and type
     user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-    has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))
+    has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))
 ):
     """
-    التحقق من صحة كلمة مرور حساب MT5 مع التحقق من ملكية الحساب
+    Verify MT5 account password with account ownership verification
 
-    المطلوب:
-    - Path Parameter: login_id (رقم حساب MT5)
+    Required:
+    - Path Parameter: login_id (MT5 account number)
     - Request Body:
     {
-        "password": "كلمة المرور المراد التحقق منها",
-        "password_type": "MAIN" أو "INVESTOR" (اختياري - افتراضي MAIN)
+        "password": "Password to verify",
+        "password_type": "MAIN" or "INVESTOR" (optional - default MAIN)
     }
 
-    العملية:
-    1. التحقق من أن login_id يخص المستخدم المصادق عليه
-    2. التحقق من كلمة المرور مع MT5
-    3. إرجاع نتيجة التحقق
+    Process:
+    1. Verify login_id belongs to authenticated user
+    2. Verify password with MT5
+    3. Return verification result
     """
     conn = None
     try:
-        # 1. التحقق من وجود البيانات المطلوبة
+        # 1. Verify required data exists
         if not password_request.get("password"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -580,7 +555,7 @@ async def verify_mt5_password(
         password = password_request["password"]
         password_type = password_request.get("password_type", "MAIN")
 
-        # 2. التحقق من أن الحساب يخص المستخدم
+        # 2. Verify account belongs to user
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -598,7 +573,7 @@ async def verify_mt5_password(
                 detail="You do not have access to this account."
             )
 
-        # 3. التحقق من كلمة المرور مع MT5
+        # 3. Verify password with MT5
         client = get_mt5_client()
         is_valid = client.check_password(
             login=login_id,
@@ -606,14 +581,14 @@ async def verify_mt5_password(
             password_type=password_type
         )
 
-        # 4. إرجاع النتيجة
+        # 4. Return result
         return {
             "success": True,
             "login_id": login_id,
             "password_type": password_type,
             "is_valid": is_valid,
             "message": "The password is correct" if is_valid else "The password is incorrect.",
-            "user_verified": True  # تأكيد أن المستخدم يملك هذا الحساب
+            "user_verified": True  # Confirm user owns this account
         }
 
     except HTTPException:
@@ -632,10 +607,6 @@ async def verify_mt5_password(
         if conn:
             conn.close()
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
 
 @router.post("/accounts/update-rights/{login_id}",
              response_model=dict,
@@ -644,29 +615,28 @@ async def update_mt5_user_rights(
     login_id: int,
     rights_data: dict,
     user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-    has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))
+    has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))
 ):
     """
-    تحديث صلاحيات وإعدادات حساب MT5 مع التحقق من ملكية الحساب
+    Update MT5 account permissions and settings with account ownership verification
 
-    المطلوب:
-    - Path Parameter: login_id (رقم حساب MT5)
+    Required:
+    - Path Parameter: login_id (MT5 account number)
     - Request Body:
     {
         "rights": {
-            "USER_RIGHT_ENABLED": 1,       // 1 لتمكين، 0 لتعطيل
-            "USER_RIGHT_TRADE_DISABLED": 0  // 1 لتعطيل التداول، 0 لتمكين
+            "USER_RIGHT_ENABLED": 1,       // 1 to enable, 0 to disable
+            "USER_RIGHT_TRADE_DISABLED": 0  // 1 to disable trading, 0 to enable
         },
-        "params": {                        // اختياري
-            "leverage": 100,               // الرافعة المالية
-            "email": "user@example.com"    // البريد الإلكتروني
+        "params": {                        // optional
+            "leverage": 100,               // leverage
+            "email": "user@example.com"    // email
         }
     }
     """
     conn = None
     try:
-        # 1. التحقق من ملكية الحساب
+        # 1. Verify account ownership
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -681,7 +651,7 @@ async def update_mt5_user_rights(
                 detail="You do not have access to this account."
             )
 
-        # 2. التحقق من وجود البيانات المطلوبة
+        # 2. Verify required data exists
         if not rights_data.get("rights"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -691,7 +661,7 @@ async def update_mt5_user_rights(
         rights = rights_data["rights"]
         params = rights_data.get("params", {})
 
-        # 3. تحديث الصلاحيات في MT5
+        # 3. Update permissions in MT5
         client = get_mt5_client()
         result = client.update_user_rights(
             login=login_id,
@@ -699,7 +669,7 @@ async def update_mt5_user_rights(
             params=params
         )
 
-        # 4. إرجاع النتيجة
+        # 4. Return result
         return {
             "success": True,
             "login_id": login_id,
@@ -726,21 +696,15 @@ async def update_mt5_user_rights(
             conn.close()
 
 
-####################################################################################################################################################
-####################################################################################################################################################
-####################################################################################################################################################
-
-
 @router.post("/accounts/{login}/deposit", summary="Deposit funds into an MT5 account")
 async def deposit_to_mt5(login: int, transaction: MT5DepositWithdraw, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                         has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))):
+                         has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    إيداع أموال في حساب MT5
+    Deposit funds into MT5 account
 
-    المتطلبات:
-    - **amount**: المبلغ المطلوب إيداعه
-    - **comment**: تعليق على العملية (اختياري)
+    Requirements:
+    - **amount**: Amount to deposit
+    - **comment**: Transaction comment (optional)
     """
     client = get_mt5_client()
     try:
@@ -763,14 +727,13 @@ async def deposit_to_mt5(login: int, transaction: MT5DepositWithdraw, user_data:
 
 @router.post("/accounts/{login}/withdraw", summary="Withdraw funds from an MT5 account")
 async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                            has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))):
+                            has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    سحب أموال من حساب MT5
+    Withdraw funds from MT5 account
 
-    المتطلبات:
-    - **amount**: المبلغ المطلوب سحبه
-    - **comment**: تعليق على العملية (اختياري)
+    Requirements:
+    - **amount**: Amount to withdraw
+    - **comment**: Transaction comment (optional)
     """
     client = get_mt5_client()
     try:
@@ -793,15 +756,14 @@ async def withdraw_from_mt5(login: int, transaction: MT5DepositWithdraw, user_da
 
 @router.post("/accounts/transfer", summary="Transfer funds between MT5 accounts")
 async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                               has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))):
+                               has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    تحويل أموال بين حسابات MT5
+    Transfer funds between MT5 accounts
 
-    المتطلبات:
-    - **from_login**: الحساب المرسل
-    - **to_login**: الحساب المستقبل
-    - **amount**: المبلغ المطلوب تحويله
+    Requirements:
+    - **from_login**: Source account
+    - **to_login**: Destination account
+    - **amount**: Amount to transfer
     """
     client = get_mt5_client()
     try:
@@ -824,10 +786,9 @@ async def transfer_between_mt5(transfer: MT5Transfer, user_data: dict = Depends(
 
 @router.post("/accounts/{login}/enable-trading", summary="Enable trading for MT5 account")
 async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                             has_permission: bool = Depends(
-        UserPermissionChecker("mt5_get_accounts"))):
+                             has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    تمكين التداول لحساب MT5
+    Enable trading for MT5 account
     """
     client = get_mt5_client()
     try:
@@ -846,10 +807,9 @@ async def enable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme),
 
 @router.post("/accounts/{login}/disable-trading", summary="Disable trading for MT5 account")
 async def disable_mt5_trading(login: int, user_data: dict = Depends(auth_scheme), _: bool = Depends(check_permission),
-                              has_permission: bool = Depends(
-                                  UserPermissionChecker("mt5_get_accounts"))):
+                              has_permission: bool = Depends(UserPermissionChecker("mt5_get_accounts"))):
     """
-    تعطيل التداول لحساب MT5
+    Disable trading for MT5 account
     """
     client = get_mt5_client()
     try:

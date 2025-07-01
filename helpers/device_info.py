@@ -3,11 +3,9 @@ import requests
 from fastapi import Request
 
 def get_device_info(request: Request):
-    """بديل يعمل بدون حزم خارجية"""
     user_agent = request.headers.get("user-agent", "unknown")
     ip_address = request.client.host if request.client else "unknown"
     
-    # تحليل بسيط لـ user-agent
     device_info = {
         "ip_address": ip_address,
         "device_name": platform.system(),
@@ -18,7 +16,6 @@ def get_device_info(request: Request):
         "city": "unknown"
     }
     
-    # محاولة الحصول على الموقع (اختياري)
     try:
         if ip_address not in ["127.0.0.1", "unknown"]:
             res = requests.get(f"http://ip-api.com/json/{ip_address}?fields=country,city", timeout=2)

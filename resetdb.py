@@ -7,48 +7,58 @@ from models.managers import create_manager_assignments_table
 from models.mt5 import create_mt5_accounts_table
 from seeder.user_seeder import seed_users
 
+
 def reset_database():
+    """
+    Completely resets the database by:
+    1. Dropping all existing tables
+    2. Recreating the schema
+    3. Seeding initial data
+
+    WARNING: This will permanently delete all data in the database!
+    """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 1. إيقاف جميع العمليات على الجداول أولاً
-        cursor.execute("PRAGMA foreign_keys = OFF")  # تعطيل المفاتيح الأجنبية مؤقتاً
+
+        # 1. First disable all table operations
+        # Temporarily disable foreign keys
+        cursor.execute("PRAGMA foreign_keys = OFF")
         conn.commit()
-        
-        # 2. الحصول على قائمة جميع الجداول
+
+        # 2. Get list of all tables
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         all_tables = [table[0] for table in cursor.fetchall()]
-        print("الجداول الموجودة قبل الحذف:", all_tables)
-        
-        # 3. حذف جميع الجداول بشكل صريح
+        print("Existing tables before deletion:", all_tables)
+
+        # 3. Explicitly drop all tables
         for table in all_tables:
             try:
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
-                print(f"تم حذف جدول {table} بنجاح")
+                print(f"Successfully dropped table {table}")
                 conn.commit()
             except Exception as e:
-                print(f"فشل في حذف جدول {table}: {str(e)}")
+                print(f"Failed to drop table {table}: {str(e)}")
                 conn.rollback()
-        
-        # 4. إعادة إنشاء الجداول
+
+        # 4. Recreate tables
         create_users_table()
         create_managers_table()
         create_manager_assignments_table()
         create_mt5_accounts_table()
-        
-        # 5. إعادة تفعيل المفاتيح الأجنبية
+
+        # 5. Re-enable foreign keys
         cursor.execute("PRAGMA foreign_keys = ON")
         conn.commit()
-        
-        # 6. إضافة البيانات الأولية
+
+        # 6. Seed initial data
         seed_users()
-        
-        print("✅ تم إعادة تعيين قاعدة البيانات بالكامل بنجاح")
-        
+
+        print("✅ Database reset completed successfully")
+
     except Exception as e:
-        print(f"❌ حدث خطأ جسيم: {str(e)}")
+        print(f"❌ Critical error occurred: {str(e)}")
         if conn:
             conn.rollback()
         raise

@@ -23,6 +23,5 @@ async def public_websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            # معالجة الرسائل الواردة (إن وجدت)
     except WebSocketDisconnect:
         await websocket_manager.disconnect_public(websocket)
