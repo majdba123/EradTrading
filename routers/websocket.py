@@ -15,3 +15,14 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     except WebSocketDisconnect:
         print(f"User {user_id} disconnected")  # Add this
         await websocket_manager.disconnect(websocket, user_id)
+        
+        
+@router.websocket("/ws/public")
+async def public_websocket_endpoint(websocket: WebSocket):
+    await websocket_manager.connect_public(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # معالجة الرسائل الواردة (إن وجدت)
+    except WebSocketDisconnect:
+        await websocket_manager.disconnect_public(websocket)

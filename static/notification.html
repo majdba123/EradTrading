@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>Account Rejection Test (User ID=2)</title>
+    <title>Account Rejection & Public Channel Test</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -81,6 +81,10 @@
             color: #1976d2;
         }
 
+        .log-public {
+            color: #7b1fa2;
+        }
+
         button {
             padding: 8px 16px;
             background: #1976d2;
@@ -101,54 +105,121 @@
             background: #f5f5f5;
             border-radius: 5px;
         }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background: #e0e0e0;
+            margin-right: 5px;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .tab.active {
+            background: #1976d2;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 
 <body>
-    <h1>Account Rejection Test</h1>
-    <p>Testing WebSocket notifications for <strong>User ID=2</strong></p>
+    <h1>WebSocket Test Page</h1>
 
-    <div id="connection-status" class="connection-status disconnected">
-        ❌ Disconnected from WebSocket
+    <div class="tabs">
+        <div class="tab active" data-tab="private">Private Channel (User ID=2)</div>
+        <div class="tab" data-tab="public">Public Channel</div>
+    </div>
+
+    <div id="private-tab" class="tab-content active">
+        <h2>Account Rejection Test</h2>
+        <p>Testing WebSocket notifications for <strong>User ID=2</strong></p>
+
+        <div id="private-connection-status" class="connection-status disconnected">
+            ❌ Disconnected from Private WebSocket
+        </div>
+
+        <div class="controls">
+            <button id="private-connect-btn">Connect Private WS</button>
+            <button id="private-disconnect-btn">Disconnect Private WS</button>
+            <button id="test-private-notification-btn">Test Rejection Notification</button>
+        </div>
+    </div>
+
+    <div id="public-tab" class="tab-content">
+        <h2>Public Channel Test</h2>
+        <p>Testing public WebSocket channel</p>
+
+        <div id="public-connection-status" class="connection-status disconnected">
+            ❌ Disconnected from Public WebSocket
+        </div>
+
+        <div class="controls">
+            <button id="public-connect-btn">Connect Public WS</button>
+            <button id="public-disconnect-btn">Disconnect Public WS</button>
+            <button id="test-public-notification-btn">Test Public Notification</button>
+        </div>
     </div>
 
     <div id="notification" class="notification"></div>
-
-    <div class="controls">
-        <button id="connect-btn">Connect WS</button>
-        <button id="disconnect-btn">Disconnect WS</button>
-        <button id="test-notification-btn">Test Notification</button>
-        <button id="clear-log-btn">Clear Log</button>
-    </div>
-
+    <button id="clear-log-btn">Clear Log</button>
     <h3>Connection Log:</h3>
     <div id="console"></div>
 
     <script>
         const userId = 2;
-        const statusEl = document.getElementById('connection-status');
         const notificationEl = document.getElementById('notification');
         const consoleEl = document.getElementById('console');
-        const connectBtn = document.getElementById('connect-btn');
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        const testNotificationBtn = document.getElementById('test-notification-btn');
         const clearLogBtn = document.getElementById('clear-log-btn');
 
-        let socket = null;
-        let reconnectAttempts = 0;
+        // Private channel elements
+        const privateStatusEl = document.getElementById('private-connection-status');
+        const privateConnectBtn = document.getElementById('private-connect-btn');
+        const privateDisconnectBtn = document.getElementById('private-disconnect-btn');
+        const privateTestNotificationBtn = document.getElementById('test-private-notification-btn');
+
+        // Public channel elements
+        const publicStatusEl = document.getElementById('public-connection-status');
+        const publicConnectBtn = document.getElementById('public-connect-btn');
+        const publicDisconnectBtn = document.getElementById('public-disconnect-btn');
+        const publicTestNotificationBtn = document.getElementById('test-public-notification-btn');
+
+        // Tab elements
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        let privateSocket = null;
+        let publicSocket = null;
+        let reconnectAttempts = {
+            private: 0,
+            public: 0
+        };
         const maxReconnectAttempts = 5;
         const reconnectDelay = 3000;
 
-        function log(message, type = 'info') {
+        function log(message, type = 'info', channel = '') {
             const entry = document.createElement('div');
             entry.className = `log-entry log-${type}`;
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            const channelPrefix = channel ? `[${channel.toUpperCase()}] ` : '';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${channelPrefix}${message}`;
             consoleEl.appendChild(entry);
             consoleEl.scrollTop = consoleEl.scrollHeight;
-            console.log(`[${type.toUpperCase()}] ${message}`);
+            console.log(`[${type.toUpperCase()}] ${channelPrefix}${message}`);
         }
 
-        function updateStatus(status, message) {
+        function updateStatus(channel, status, message) {
+            const statusEl = channel === 'private' ? privateStatusEl : publicStatusEl;
             statusEl.textContent = message;
             statusEl.className = `connection-status ${status}`;
         }
@@ -161,106 +232,160 @@
             }, duration);
         }
 
-        function connectWebSocket() {
+        function connectWebSocket(channel) {
+            const isPrivate = channel === 'private';
+            const socket = isPrivate ? privateSocket : publicSocket;
+
             if (socket && socket.readyState === WebSocket.OPEN) {
-                log('WebSocket already connected', 'warning');
+                log('WebSocket already connected', 'warning', channel);
                 return;
             }
 
-            updateStatus('connecting', '🔄 Connecting to WebSocket...');
-            log(`Attempting to connect to WebSocket for user ${userId}`, 'info');
+            updateStatus(channel, 'connecting', '🔄 Connecting to WebSocket...');
+            log(`Attempting to connect to ${channel} WebSocket`, 'info', channel);
 
-            const socketUrl = `ws://${window.location.hostname}:8000/ws/${userId}`;
-            socket = new WebSocket(socketUrl);
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const host = window.location.host;
+            const socketUrl = isPrivate
+                ? `${protocol}${host}/ws/${userId}`
+                : `${protocol}${host}/ws/public`;
 
+            if (isPrivate) {
+                privateSocket = new WebSocket(socketUrl);
+                setupSocketHandlers(privateSocket, 'private');
+            } else {
+                publicSocket = new WebSocket(socketUrl);
+                setupSocketHandlers(publicSocket, 'public');
+            }
+        }
+
+        function setupSocketHandlers(socket, channel) {
             socket.onopen = () => {
-                reconnectAttempts = 0;
-                updateStatus('connected', '✅ Connected to WebSocket');
-                log('WebSocket connection established successfully', 'success');
-                showNotification('WebSocket connected successfully', 3000);
+                reconnectAttempts[channel] = 0;
+                updateStatus(channel, 'connected', `✅ Connected to ${channel} WebSocket`);
+                log(`WebSocket connection established successfully`, 'success', channel);
+                showNotification(`${channel} WebSocket connected successfully`, 3000);
             };
 
             socket.onmessage = (event) => {
-                log(`Received raw message: ${event.data}`, 'info');
+                log(`Received message: ${event.data}`, 'info', channel);
                 try {
                     const data = JSON.parse(event.data);
-                    log(`Parsed message: ${JSON.stringify(data, null, 2)}`, 'info');
+                    log(`Parsed message: ${JSON.stringify(data, null, 2)}`, 'info', channel);
 
-                    if (data.type === 'account_rejected') {
-                        showNotification(data.message);
-                        log('Account rejection notification received', 'success');
+                    // Handle account rejection specifically for private channel
+                    if (channel === 'private' && data.type === 'account_rejected') {
+                        showNotification(`[ACCOUNT REJECTED] ${data.message}`);
+                        log('Account rejection notification received', 'success', channel);
+                    }
+                    // Handle public notifications
+                    else if (channel === 'public') {
+                        showNotification(`[PUBLIC] ${data.message}`);
+                    }
+                    // Fallback for other messages
+                    else {
+                        showNotification(`[${channel}] ${data.message || event.data}`);
                     }
                 } catch (e) {
-                    log(`Error parsing message: ${e}`, 'error');
+                    log(`Raw message: ${event.data}`, 'info', channel);
+                    showNotification(`[${channel}] ${event.data}`);
                 }
             };
 
             socket.onerror = (error) => {
-                log(`WebSocket error: ${JSON.stringify(error)}`, 'error');
-                updateStatus('disconnected', '❌ WebSocket Error');
-                attemptReconnect();
+                log(`WebSocket error: ${JSON.stringify(error)}`, 'error', channel);
+                updateStatus(channel, 'disconnected', `❌ ${channel} WebSocket Error`);
+                attemptReconnect(channel);
             };
 
             socket.onclose = (event) => {
-                log(`WebSocket closed: Code=${event.code}, Reason=${event.reason || 'none'}`, 'warning');
-                updateStatus('disconnected', '⚠️ WebSocket Disconnected');
-                if (event.code !== 1000) { // 1000 is normal closure
-                    attemptReconnect();
+                log(`WebSocket closed: Code=${event.code}, Reason=${event.reason || 'none'}`, 'warning', channel);
+                updateStatus(channel, 'disconnected', `⚠️ ${channel} WebSocket Disconnected`);
+                if (event.code !== 1000) {
+                    attemptReconnect(channel);
                 }
             };
         }
 
-        function disconnectWebSocket() {
+        function disconnectWebSocket(channel) {
+            const socket = channel === 'private' ? privateSocket : publicSocket;
             if (socket) {
-                log('Closing WebSocket connection...', 'info');
+                log('Closing WebSocket connection...', 'info', channel);
                 socket.close(1000, 'User requested disconnect');
-                socket = null;
+                if (channel === 'private') {
+                    privateSocket = null;
+                } else {
+                    publicSocket = null;
+                }
             } else {
-                log('No active WebSocket connection to disconnect', 'warning');
+                log(`No active ${channel} WebSocket connection to disconnect`, 'warning', channel);
             }
         }
 
-        function attemptReconnect() {
-            if (reconnectAttempts < maxReconnectAttempts) {
-                reconnectAttempts++;
-                log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`, 'warning');
-                setTimeout(connectWebSocket, reconnectDelay);
+        function attemptReconnect(channel) {
+            if (reconnectAttempts[channel] < maxReconnectAttempts) {
+                reconnectAttempts[channel]++;
+                log(`Attempting to reconnect (${reconnectAttempts[channel]}/${maxReconnectAttempts})...`, 'warning', channel);
+                setTimeout(() => connectWebSocket(channel), reconnectDelay);
             } else {
-                log('Max reconnection attempts reached. Please refresh the page.', 'error');
-                updateStatus('disconnected', '❌ Failed to reconnect');
+                log('Max reconnection attempts reached. Please refresh the page.', 'error', channel);
+                updateStatus(channel, 'disconnected', `❌ Failed to reconnect to ${channel} channel`);
             }
         }
 
-        function sendTestNotification() {
+        function sendTestNotification(channel) {
+            const socket = channel === 'private' ? privateSocket : publicSocket;
             if (socket && socket.readyState === WebSocket.OPEN) {
                 const testMsg = {
-                    type: 'test_notification',
-                    message: 'This is a test notification from the browser',
+                    type: channel === 'private' ? 'account_rejected' : 'public_notification',
+                    message: channel === 'private'
+                        ? 'Your account has been rejected (TEST)'
+                        : 'This is a public test message',
                     timestamp: new Date().toISOString()
                 };
                 socket.send(JSON.stringify(testMsg));
-                log('Sent test notification to server', 'info');
+                log(`Sent test message to ${channel} server`, 'info', channel);
             } else {
-                log('Cannot send test notification - WebSocket not connected', 'error');
+                log(`Cannot send test message - ${channel} WebSocket not connected`, 'error', channel);
             }
         }
 
         // Event listeners
-        connectBtn.addEventListener('click', connectWebSocket);
-        disconnectBtn.addEventListener('click', disconnectWebSocket);
-        testNotificationBtn.addEventListener('click', sendTestNotification);
+        privateConnectBtn.addEventListener('click', () => connectWebSocket('private'));
+        privateDisconnectBtn.addEventListener('click', () => disconnectWebSocket('private'));
+        privateTestNotificationBtn.addEventListener('click', () => sendTestNotification('private'));
+
+        publicConnectBtn.addEventListener('click', () => connectWebSocket('public'));
+        publicDisconnectBtn.addEventListener('click', () => disconnectWebSocket('public'));
+        publicTestNotificationBtn.addEventListener('click', () => sendTestNotification('public'));
+
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
+            });
+        });
+
+        // Clear log
         clearLogBtn.addEventListener('click', () => {
             consoleEl.innerHTML = '';
             log('Log cleared', 'info');
         });
 
-        // Initial connection
-        connectWebSocket();
+        // Initial connections
+        connectWebSocket('private');
+        connectWebSocket('public');
 
-        // Add heartbeat to keep connection alive
+        // Heartbeat
         setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'heartbeat' }));
+            if (privateSocket && privateSocket.readyState === WebSocket.OPEN) {
+                privateSocket.send(JSON.stringify({ type: 'heartbeat', user_id: userId }));
+            }
+            if (publicSocket && publicSocket.readyState === WebSocket.OPEN) {
+                publicSocket.send(JSON.stringify({ type: 'heartbeat' }));
             }
         }, 30000);
     </script>

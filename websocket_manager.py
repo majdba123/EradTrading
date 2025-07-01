@@ -7,6 +7,8 @@ import asyncio
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.active_public_connections: List[WebSocket] = []  # القناة العامة
+
         self.lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, user_id: str):
@@ -45,6 +47,33 @@ class ConnectionManager:
                     self.active_connections[channel].remove(ws)
             else:
                 print(f"Channel {channel} not found in active connections")  # Add this
+                
+                
+                
+    async def connect_public(self, websocket: WebSocket):
+        await websocket.accept()
+        async with self.lock:
+            self.active_public_connections.append(websocket)
+            
+    async def disconnect_public(self, websocket: WebSocket):
+        async with self.lock:
+            if websocket in self.active_public_connections:
+                self.active_public_connections.remove(websocket)
+
+    async def broadcast_notification(self, message: dict):
+        async with self.lock:
+            print(f"Broadcasting to {len(self.active_public_connections)} public connections")  # Debug
+            disconnected = []
+            message_str = json.dumps(message)
+            for ws in self.active_public_connections:
+                try:
+                    await ws.send_text(message_str)
+                    print(f"Broadcast message sent: {message_str}")  # Debug
+                except WebSocketDisconnect:
+                    disconnected.append(ws)
+            
+            for ws in disconnected:
+                self.active_public_connections.remove(ws)
 
 # Single shared instance
 websocket_manager = ConnectionManager()

@@ -34,3 +34,6 @@ class ManagerFilter(BaseModel):
 class UserStatusUpdate(BaseModel):
     user_id: int
     new_status: str  # يمكن أن يكون: 'pending', 'approved', 'rejected', 'banned'
+    
+    
+    

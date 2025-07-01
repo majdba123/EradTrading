@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from websocket_manager import websocket_manager  # استيراد مدير WebSocket
 from auth import auth_scheme
 import datetime
+from models.notifications import store_notification
 
 import json  # استيراد json هنا أيضاً
 import asyncio
@@ -325,9 +326,8 @@ def get_managers_with_users(
         if conn:
             conn.close()
 
-
 @router.post("/assign-user-to-manager/{manager_id}")
-def assign_user_to_manager(
+async def assign_user_to_manager(
     manager_id: int,
     request: AssignUserRequest,
     admin_data: dict = Depends(admin_scheme)
@@ -348,7 +348,7 @@ def assign_user_to_manager(
 
         # التحقق من وجود المستخدم
         cursor.execute("SELECT id, type FROM users WHERE id = ?",
-                       (request.user_id,))
+                      (request.user_id,))
         user = cursor.fetchone()
         if not user:
             raise HTTPException(
@@ -367,7 +367,7 @@ def assign_user_to_manager(
         cursor.execute("""
             SELECT manager_id FROM manager_assignments 
             WHERE user_id = ?
-        """, (request.user_id,))
+            """, (request.user_id,))
         existing_assignment = cursor.fetchone()
 
         if existing_assignment:
@@ -381,8 +381,36 @@ def assign_user_to_manager(
             INSERT INTO manager_assignments (manager_id, user_id)
             VALUES (?, ?)
         """, (manager_id, request.user_id))
+        conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "manager_assigned",
+            "message": f"You have been assigned to manager ID: {manager_id}",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user_id": str(request.user_id)
+        }
+        
+        # إرسال إشعار الوقت الحقيقي
+        print(f"Attempting to send notification to user {request.user_id}")
+        await websocket_manager.send_personal_notification(str(request.user_id), notification)
+        await asyncio.sleep(0.1)  # Small delay to let other transactions complete
+
+        print("Notification sent successfully")
+        
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=request.user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(f"Notification stored in database with ID: {notification_id}")
+        except Exception as e:
+            print(f"Failed to store notification: {str(e)}")
 
         conn.commit()
+            
         return {
             "success": True,
             "message": "تم ربط المستخدم بالمدير بنجاح",
@@ -391,12 +419,15 @@ def assign_user_to_manager(
         }
 
     except sqlite3.IntegrityError as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"خطأ في قاعدة البيانات: {str(e)}"
         )
     except HTTPException:
+        if conn:
+            conn.rollback()
         raise
     except Exception as e:
         if conn:
@@ -602,9 +633,8 @@ def get_manager_users(
 
 ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'banned']
 
-
 @router.put("/update-user-status")
-def update_user_status(
+async def update_user_status(
     status_data: UserStatusUpdate,
     admin_data: dict = Depends(admin_scheme)
 ):
@@ -652,6 +682,33 @@ def update_user_status(
                 "DELETE FROM user_sessions WHERE user_id = ?",
                 (status_data.user_id,)
             )
+        conn.commit()
+        # إعداد الإشعار
+        notification = {
+            "type": "status_update",
+            "message": f"Your account status has been updated to: {status_data.new_status}",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user_id": str(status_data.user_id)
+        }
+        
+        # إرسال إشعار الوقت الحقيقي
+        print(f"Attempting to send notification to user {status_data.user_id}")
+        await websocket_manager.send_personal_notification(str(status_data.user_id), notification)
+        await asyncio.sleep(0.1)  # Small delay to let other transactions complete
+
+        print("Notification sent successfully")
+        
+        # تخزين الإشعار في قاعدة البيانات
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=status_data.user_id,
+                message=notification['message'],
+                is_admin=False
+            )
+            print(f"Notification stored in database with ID: {notification_id}")
+        except Exception as e:
+            print(f"Failed to store notification: {str(e)}")
 
         conn.commit()
 
@@ -663,6 +720,8 @@ def update_user_status(
         }
 
     except HTTPException:
+        if conn:
+            conn.rollback()
         raise
     except Exception as e:
         if conn:
@@ -735,12 +794,31 @@ def get_pending_accounts(
             conn.close()
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @router.post("/approve-account/{user_id}", summary="Approve user account")
-def approve_user_account(
+async def approve_user_account(
     user_id: int,
     admin_data: dict = Depends(admin_scheme)
 ):
-    """Approve a pending user account"""
+    """Approve a pending user account with real-time notification"""
     conn = None
     try:
         conn = get_db_connection()
@@ -770,14 +848,42 @@ def approve_user_account(
             "UPDATE users SET status = 'approved' WHERE id = ?",
             (user_id,)
         )
+        
         conn.commit()
 
+        # Prepare notification - تأكد من أن user_id هو string
+        notification = {
+            "type": "account_approved",
+            "message": "Your account registration has been approved by the administrator.",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user_id": str(user_id)  # تحويل إلى string هنا
+        }
+        
+        # Send real-time notification
+        print(f"Attempting to send notification to user {user_id}")
+        await websocket_manager.send_personal_notification(str(user_id), notification)
+        await asyncio.sleep(0.1)  # Small delay to let other transactions complete
+
+        print("Notification sent successfully")
+        
+        
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],  # or whatever contains your message
+                is_admin=False  # since this is going to a regular user
+            )
+            print(f"Notification stored in database with ID: {notification_id}")
+        except Exception as e:
+            print(f"Failed to store notification: {str(e)}")
+        
         return {
             "success": True,
-            "message": "Account approved successfully",
+            "message": "Account rejected successfully",
             "user_id": user_id,
-            "new_status": "approved"
         }
+
 
     except Exception as e:
         if conn:
@@ -789,6 +895,31 @@ def approve_user_account(
     finally:
         if conn:
             conn.close()
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
 @router.post("/reject-account/{user_id}", summary="Reject user account")
 async def reject_user_account(
     user_id: int,
@@ -844,7 +975,21 @@ async def reject_user_account(
         # Send real-time notification
         print(f"Attempting to send notification to user {user_id}")
         await websocket_manager.send_personal_notification(str(user_id), notification)
+        await asyncio.sleep(0.1)  # Small delay to let other transactions complete
+
         print("Notification sent successfully")
+        
+        
+        from models.notifications import store_notification
+        try:
+            notification_id = store_notification(
+                user_id=user_id,
+                message=notification['message'],  # or whatever contains your message
+                is_admin=False  # since this is going to a regular user
+            )
+            print(f"Notification stored in database with ID: {notification_id}")
+        except Exception as e:
+            print(f"Failed to store notification: {str(e)}")
         
         return {
             "success": True,
